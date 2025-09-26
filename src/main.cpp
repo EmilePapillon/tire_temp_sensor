@@ -18,7 +18,7 @@ uint8_t macaddr[6];
 uint16_t eeData[ee_data_size];
 uint16_t frameData[frame_data_size];
 float tempData[num_pixels];
-
+char rowBuf[512];
 paramsMLX90641 mlxParams;
 
 struct DataPack {
@@ -35,7 +35,7 @@ DataPack datapackThr;
 void setup() {
     Serial.begin(115200);
     Wire.begin();
-
+    Wire.setClock(400000);
     delay(1000);
     Serial.println("const int div = 32; DONT FOGET TO CHANGE THIS IN THE DRIVER");
     Serial.println("Initializing MLX90641...");
@@ -54,7 +54,7 @@ void setup() {
 
     // Optional: Set resolution and refresh rate
     MLX90641_SetResolution(mlx90641_i2c_addr, 0x03);     // 17-bit resolution
-    MLX90641_SetRefreshRate(mlx90641_i2c_addr, 0x05);     // 8Hz refresh
+    MLX90641_SetRefreshRate(mlx90641_i2c_addr, 0x06);     // 16Hz refresh
 
     Serial.println("MLX90641 ready.");
 
@@ -88,11 +88,25 @@ void printStatus(void) {
 }
 
 void loop() {
-    if (MLX90641_GetFrameData(mlx90641_i2c_addr, frameData) != 0) {
-        Serial.println("Failed to get frame data");
+    const int maxRetries = 5;   
+    int retries = 0;
+    int status;
+
+    do {
+        status = MLX90641_GetFrameData(mlx90641_i2c_addr, frameData);
+        if (status != 0) {
+            retries++;
+            // Serial.printf("Missed frame %d\n", retries);
+            delay(1); // short delay before retry
+        }
+    } while (status != 0 && retries < maxRetries);
+
+    // If still failed after max retries, skip this iteration entirely
+    if (status != 0) {
+        Serial.println("Missed frame, all retries failed. Skipping notification.");
         return;
     }
-
+    // delay(20);
     // float vdd = MLX90641_GetVdd(frameData, &mlxParams);
     float ta = MLX90641_GetTa(frameData, &mlxParams);
 
@@ -100,31 +114,7 @@ void loop() {
     float tr = ta - 8.0f;
 
     MLX90641_CalculateTo(frameData, &mlxParams, 0.95f, tr, tempData);
-
-    // Serial.print("Vdd: "); Serial.print(vdd);
-    // Serial.print(" V, Ta: "); Serial.print(ta);
-    // Serial.println(" °C");
-
-    // Serial.print("Center pixel: ");
-    // Serial.print(tempData[96]);  // Roughly center of 16x12 grid
-    // Serial.println(" °C");
-
-    for (uint8_t row = 0u; row < 6u; row++) {
-        float avg1 = 0.0f;
-        float avg2 = 0.0f;
-        for (uint8_t col = 0u; col < 16u; col++) {
-            avg1 += tempData[(row * 2u) * 16u + col];
-            avg2 += tempData[(row * 2u + 1u) * 16u + col];
-        }
-        datapackOne.temps[row] = static_cast<int16_t>(temp_offset + temp_scaling * 10.0f * avg1 / 16.0f);
-        datapackTwo.temps[row] = static_cast<int16_t>(temp_offset + temp_scaling * 10.0f * avg2 / 16.0f);
-        datapackThr.temps[row] = static_cast<int16_t>(max(datapackOne.temps[row], datapackTwo.temps[row]));
-    }
-    printStatus();
-    if (Bluefruit.connected()) {
-        GATTone.notify(&datapackOne, sizeof(datapackOne));
-        GATTtwo.notify(&datapackTwo, sizeof(datapackTwo));
-        GATTthr.notify(&datapackThr, sizeof(datapackThr));
-    }
-    delay(1000u);
+    Serial.write((uint8_t*)tempData, sizeof(tempData));
+    
+    
 }
