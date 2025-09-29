@@ -1,4 +1,3 @@
-# robust_mlx90641_reader_with_column_avg.py
 import time
 import numpy as np
 import matplotlib.pyplot as plt

@@ -22,15 +22,13 @@ char rowBuf[512];
 paramsMLX90641 mlxParams;
 
 struct DataPack {
-  uint8_t  protocol{};         // version of protocol used
-  uint8_t  unused_one{};
-  int16_t  unused_two{};       
-  int16_t  temps[6]{};         // all even numbered temp spots (degrees Celsius x 10)
-} __attribute__((packed)) ;
+  uint8_t  protocol;       // version of protocol
+  uint8_t  packet_id;      // 0..3 → which quarter of the data this is
+  uint8_t reserved;       // future use or alignment
+  int16_t  temps[8];       // 4 averaged temperatures (°C × 10)
+} __attribute__((packed));
 
-DataPack datapackOne;
-DataPack datapackTwo;
-DataPack datapackThr;
+DataPack datapack;
 
 void setup() {
     Serial.begin(115200);
@@ -76,15 +74,30 @@ void setup() {
 void printStatus(void) {
 
   for (uint8_t i=0; i<6; i++) {
-    Serial.print(datapackOne.temps[i]);
-    Serial.print("\t");
-    Serial.print(datapackTwo.temps[i]);
-    Serial.print("\t");
-    Serial.print(datapackThr.temps[i]);
+    Serial.print(datapack.temps[i]);
     Serial.print("\t");
   }
 
   Serial.println();
+}
+
+void sendColumnAveragesBLE(float* avgColumns16) {
+    if (!Bluefruit.connected()) return;
+
+    for (uint8_t packetId = 0; packetId < 2; packetId++) {
+        datapack.protocol = 1;
+        datapack.packet_id = packetId;
+        datapack.reserved = 0;
+
+        // Fill 8 temps for this half
+        for (uint8_t i = 0; i < 8; i++) {
+            uint8_t col = i + packetId * 8;
+            datapack.temps[i] = static_cast<int16_t>(avgColumns16[col] * 10.0f);
+        }
+
+        GATTone.notify((uint8_t*)&datapack, sizeof(datapack));
+        delay(5); // small delay to avoid BLE congestion
+    }
 }
 
 void loop() {
@@ -115,6 +128,16 @@ void loop() {
 
     MLX90641_CalculateTo(frameData, &mlxParams, 0.95f, tr, tempData);
     Serial.write((uint8_t*)tempData, sizeof(tempData));
-    
+    // Row 0, pixels [0 .. 15]
+    float colAvg[16];
+    for (int col = 0; col < 16; col++) {
+        float sum = 0.0f;
+        for (int row = 0; row < 12; row++) {
+            sum += tempData[row * 16 + col];  // row-major order
+        }
+        colAvg[col] = sum / 12.0f;  // average of this column
+    }    
+
+    sendColumnAveragesBLE(colAvg);
     
 }
