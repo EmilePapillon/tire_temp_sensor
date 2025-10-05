@@ -71,15 +71,7 @@ void setup() {
     Serial.println("Running!");
 }
 
-void printStatus(void) {
 
-  for (uint8_t i=0; i<6; i++) {
-    Serial.print(datapack.temps[i]);
-    Serial.print("\t");
-  }
-
-  Serial.println();
-}
 
 void sendColumnAveragesBLE(float* avgColumns16) {
     if (!Bluefruit.connected()) return;
