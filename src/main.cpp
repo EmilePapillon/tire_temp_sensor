@@ -109,7 +109,6 @@ void loop() {
         status = MLX90641_GetFrameData(mlx90641_i2c_addr, frameData);
         if (status != 0) {
             retries++;
-            // Serial.printf("Missed frame %d\n", retries);
             delay(1); // short delay before retry
         }
     } while (status != 0 && retries < maxRetries);
@@ -119,8 +118,7 @@ void loop() {
         Serial.println("Missed frame, all retries failed. Skipping notification.");
         return;
     }
-    // delay(20);
-    // float vdd = MLX90641_GetVdd(frameData, &mlxParams);
+
     float ta = MLX90641_GetTa(frameData, &mlxParams);
 
     // For ambient reflection compensation, estimate reflected temperature

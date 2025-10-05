@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import serial
 
 # -------- CONFIG ----------
-COM_PORT = "COM4"
+COM_PORT = "/dev/cu.usbserial-0247185B"
 BAUDRATE = 115200
 ROWS, COLS = 12, 16
 BYTES_PER_FRAME = ROWS * COLS * 4  # 192 floats * 4 bytes
