@@ -387,12 +387,12 @@ uint32_t MLX90641EEpromParser::extract_raw_field(const std::array<uint16_t, eepr
 {
     if (w.address < eeprom_start_address)
     {
-        throw std::out_of_range("EEPROM address below start address");
+        // throw std::out_of_range("EEPROM address below start address");
     }
     const uint16_t index = w.address - eeprom_start_address;
     if (index >= eeprom_size)
     {
-        throw std::out_of_range("EEPROM index out of range");
+        // throw std::out_of_range("EEPROM index out of range");
     }
     // check for bit_width of 32 to avoid undefined behavior
     const uint32_t mask = w.bit_width >= 32 ? 0xFFFFFFFFu : ((1ul << w.bit_width) - 1ul);
@@ -422,7 +422,7 @@ int32_t MLX90641EEpromParser::extract_param_array(const DualEepromWord& words) c
     const uint8_t total_bit_width = upper.bit_width + lower.bit_width;
 
     if (total_bit_width > 32) {
-        throw std::runtime_error("Combined bit width exceeds 32 bits");
+        // throw std::runtime_error("Combined bit width exceeds 32 bits");
     }
 
     const uint32_t upper_val = extract_raw_field(eeprom_data_, upper);

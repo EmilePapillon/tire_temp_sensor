@@ -26,6 +26,9 @@ bool I2CAdapter::read(uint8_t device_address,
 
     int written1 = wire_.write(cmd[0]);
     int written2 = wire_.write(cmd[1]);
+    if (written1 != 1 || written2 != 1) {
+        return false; // Failed to write register address
+    }
 
     int end = wire_.endTransmission(false);
     if (end == 2 || end == 3) return false;
@@ -74,6 +77,9 @@ bool I2CAdapter::write(uint8_t device_address,
     int written2 = wire_.write(cmd[1]);
     int written3 = wire_.write(cmd[2]);
     int written4 = wire_.write(cmd[3]);
+    if (written1 != 1 || written2 != 1 || written3 != 1 || written4 != 1) {
+        return false; // Failed to write all bytes
+    }
 
     int end = wire_.endTransmission();
     if (end == 2 || end == 3) return false;

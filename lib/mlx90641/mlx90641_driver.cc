@@ -16,13 +16,17 @@ MLX90641Sensor::MLX90641Sensor(I2CAdapter& i2c_adapter, uint8_t i2c_addr)
 
 bool MLX90641Sensor::init()
 {
+    if (!i2c_.init())
+        return false;
+    i2c_.set_frequency(400); // 400 kHz, TODO: make configurable
     if (dump_ee() != 0)
         return false;
     if (extract_parameters() != 0)
         return false;
     // TODO: allow configuration of refresh rate and resolution
-    set_refresh_rate(0x03);
-    set_resolution(0x03);
+    set_resolution(0x03);     // 17-bit resolution
+    set_refresh_rate(0x06);     // 16Hz refresh
+
     return true;
 }
 

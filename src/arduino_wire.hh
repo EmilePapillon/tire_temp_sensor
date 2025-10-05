@@ -17,5 +17,5 @@ public:
     int read() override;
     int peek() override;
     void flush() override;
-    void delayMicroseconds(int us) override { ::delayMicroseconds(us); }
+    void delayMicroseconds(int us) override;
 };

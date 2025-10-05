@@ -11,7 +11,7 @@ void Wire::setClock(uint32_t freq) {
 }
 
 int Wire::endTransmission(bool stop) {
-    ::Wire.endTransmission(stop);
+    return ::Wire.endTransmission(stop);
 }
 
 void Wire::beginTransmission(uint8_t address) {

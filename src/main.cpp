@@ -1,9 +1,9 @@
 #include <Arduino.h>
-#include <Wire.h>
-#include "MLX90641_API.h"
+#include "arduino_wire.hh"
+#include "mlx90641_driver.hh"
 #include "BLE_gatt.h"
-
 #include <bluefruit.h>
+#include "data_pack.hh"
 
 // Replace #define with constexpr
 constexpr uint8_t mlx90641_i2c_addr = 0x33; // MLX90641 I2C address
@@ -19,41 +19,18 @@ uint16_t eeData[ee_data_size];
 uint16_t frameData[frame_data_size];
 float tempData[num_pixels];
 char rowBuf[512];
-paramsMLX90641 mlxParams;
-
-struct DataPack {
-  uint8_t  protocol;       // version of protocol
-  uint8_t  packet_id;      // 0..3 → which quarter of the data this is
-  uint8_t reserved;       // future use or alignment
-  int16_t  temps[8];       // 4 averaged temperatures (°C × 10)
-} __attribute__((packed));
-
+Wire wire; 
+I2CAdapter i2c_adapter(wire);
+mlx90641::MLX90641Sensor mlx_sensor(i2c_adapter);
 DataPack datapack;
 
 void setup() {
     Serial.begin(115200);
-    Wire.begin();
-    Wire.setClock(400000);
-    delay(1000);
-    Serial.println("const int div = 32; DONT FOGET TO CHANGE THIS IN THE DRIVER");
-    Serial.println("Initializing MLX90641...");
-
-    // Read EEPROM data
-    if (MLX90641_DumpEE(mlx90641_i2c_addr, eeData) != 0) {
-        Serial.println("Failed to read EEPROM data!");
-        while (1);
+    bool result = mlx_sensor.init();
+    if (!result) {
+        Serial.println("Failed to initialize MLX90641!");
+        while (1) delay(1000);
     }
-
-    // Extract calibration parameters
-    if (MLX90641_ExtractParameters(eeData, &mlxParams) != 0) {
-        Serial.println("Failed to extract calibration parameters!");
-        while (1);
-    }
-
-    // Optional: Set resolution and refresh rate
-    MLX90641_SetResolution(mlx90641_i2c_addr, 0x03);     // 17-bit resolution
-    MLX90641_SetRefreshRate(mlx90641_i2c_addr, 0x06);     // 16Hz refresh
-
     Serial.println("MLX90641 ready.");
 
     delay(5000);
@@ -95,29 +72,27 @@ void sendColumnAveragesBLE(float* avgColumns16) {
 void loop() {
     const int maxRetries = 5;   
     int retries = 0;
-    int status;
+    bool frameSuccess = false;
 
-    do {
-        status = MLX90641_GetFrameData(mlx90641_i2c_addr, frameData);
-        if (status != 0) {
+    while (!frameSuccess && retries < maxRetries) {
+        frameSuccess = mlx_sensor.read_frame();
+        if (!frameSuccess) {
             retries++;
             delay(1); // short delay before retry
         }
-    } while (status != 0 && retries < maxRetries);
+    }
 
     // If still failed after max retries, skip this iteration entirely
-    if (status != 0) {
+    if (!frameSuccess) {
         Serial.println("Missed frame, all retries failed. Skipping notification.");
         return;
     }
 
-    float ta = MLX90641_GetTa(frameData, &mlxParams);
+    mlx_sensor.calculate_temps();
+    auto tempData = mlx_sensor.get_temps();
 
-    // For ambient reflection compensation, estimate reflected temperature
-    float tr = ta - 8.0f;
-
-    MLX90641_CalculateTo(frameData, &mlxParams, 0.95f, tr, tempData);
-    Serial.write((uint8_t*)tempData, sizeof(tempData));
+    Serial.write((uint8_t*)tempData.data(), tempData.size() * sizeof(float));
+    
     // Row 0, pixels [0 .. 15]
     float colAvg[16];
     for (int col = 0; col < 16; col++) {
