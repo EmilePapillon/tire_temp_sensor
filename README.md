@@ -10,3 +10,13 @@ This project is firmware for an Adafruit Feather nRF52832 board that reads tire 
    ```sh
    pio run --target upload
    ```
+
+## Contributing
+
+To contribute to this repository:
+
+1. Open a pull request (PR) targeting the `main` branch.
+2. Request a review from a project maintainer.
+3. Ensure your changes have unit test coverage.
+4. Verify that your changes do not break the build.
+5. Make sure all unit tests are passing.
