@@ -18,6 +18,7 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     params.resolutionEE = get_resolution_ee();
     params.KsTa = get_ks_ta();
     params.ksTo = get_ks_to();
+    params.ct = get_ct();
     params.alpha = get_alpha();
     params.offset = get_offset();
     params.kta = get_kta();

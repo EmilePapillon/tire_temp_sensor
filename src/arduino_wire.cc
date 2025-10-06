@@ -26,7 +26,7 @@ std::size_t Wire::write(uint8_t data) {
     return ::Wire.write(data);
 }
 
-std::size_t Wire::write(const uint8_t* data, std::size_t quantity) {
+std::size_t Wire::write(const char* data, std::size_t quantity) {
     return ::Wire.write(data, quantity);
 }
 

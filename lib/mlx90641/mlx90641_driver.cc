@@ -5,8 +5,8 @@
 
 namespace mlx90641 {
 
-MLX90641Sensor::MLX90641Sensor(I2CAdapter& i2c_adapter, uint8_t i2c_addr)
-    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), ambient_(0.0f)
+MLX90641Sensor::MLX90641Sensor(I2CAdapter& i2c_adapter, uint8_t i2c_addr, Logger* logger_ptr)
+    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), ambient_(0.0f), logger_(logger_ptr)
 {
     temps_.fill(0.0f);
     ee_data_.fill(0);
@@ -16,17 +16,57 @@ MLX90641Sensor::MLX90641Sensor(I2CAdapter& i2c_adapter, uint8_t i2c_addr)
 
 bool MLX90641Sensor::init()
 {
-    if (!i2c_.init())
+    log(Logger::Level::DEBUG, "Starting MLX90641 sensor initialization");
+    
+    log(Logger::Level::DEBUG, "Initializing I2C adapter");
+    if (!i2c_.init(400)) {
+        log(Logger::Level::ERROR, "Failed to initialize I2C adapter");
         return false;
-    i2c_.set_frequency(400); // 400 kHz, TODO: make configurable
-    if (dump_ee() != 0)
+    }
+    log(Logger::Level::DEBUG, "I2C adapter initialized successfully");
+    
+    log(Logger::Level::DEBUG, "Dumping EEPROM data");
+    int ee_result = dump_ee();
+    if (ee_result != 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to dump EEPROM data, error: %d", ee_result);
+        log(Logger::Level::ERROR, msg);
         return false;
-    if (extract_parameters() != 0)
+    }
+    log(Logger::Level::DEBUG, "EEPROM data dumped successfully");
+    
+    log(Logger::Level::DEBUG, "Extracting calibration parameters");
+    int param_result = extract_parameters();
+    if (param_result != 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to extract parameters, error: %d", param_result);
+        log(Logger::Level::ERROR, msg);
         return false;
+    }
+    log(Logger::Level::DEBUG, "Calibration parameters extracted successfully");
+    
     // TODO: allow configuration of refresh rate and resolution
-    set_resolution(0x03);     // 17-bit resolution
-    set_refresh_rate(0x06);     // 16Hz refresh
+    log(Logger::Level::DEBUG, "Setting resolution to 17-bit (0x03)");
+    int res_result = set_resolution(0x03);     // 17-bit resolution
+    if (res_result != 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to set resolution, error: %d", res_result);
+        log(Logger::Level::WARN, msg);
+    } else {
+        log(Logger::Level::DEBUG, "Resolution set successfully");
+    }
+    
+    log(Logger::Level::DEBUG, "Setting refresh rate to 16Hz (0x06)");
+    int rate_result = set_refresh_rate(0x06);     // 16Hz refresh
+    if (rate_result != 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to set refresh rate, error: %d", rate_result);
+        log(Logger::Level::WARN, msg);
+    } else {
+        log(Logger::Level::DEBUG, "Refresh rate set successfully");
+    }
 
+    log(Logger::Level::INFO, "MLX90641 sensor initialization completed successfully");
     return true;
 }
 
@@ -60,10 +100,12 @@ float MLX90641Sensor::get_ambient() const
 
 int MLX90641Sensor::dump_ee()
 {
-    int error = i2c_.read(i2c_addr_, 0x2400, 832, ee_data_.data());
-    if (error == 0)
-        error = hamming_decode();
-    return error;
+    bool success = i2c_.read(i2c_addr_, 0x2400, 832, ee_data_.data());
+    
+    int hamming_decode_error_code = 0;
+    if (success)
+        hamming_decode_error_code = hamming_decode();
+    return success ? hamming_decode_error_code : -1;
 }
 
 int MLX90641Sensor::hamming_decode()
@@ -217,14 +259,38 @@ int MLX90641Sensor::get_frame_data()
 int MLX90641Sensor::extract_parameters()
 {
     int error = check_eeprom_valid();
-    
+    bool extractions_successful = false;
     if(error == 0)
     {
-        error = MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_);
-    }
-    
-    return error;
+        if (logger_) {
+            char debug_msg[512];
+            snprintf(debug_msg, sizeof(debug_msg), 
+                "Raw EEPROM - [34]: 0x%04X, [52]: 0x%04X, [53]: 0x%04X, [54]: 0x%04X, [45]: 0x%04X, [256]: 0x%04X", 
+                ee_data_[34],   // KsTa
+                ee_data_[52],   // ksTo scale
+                ee_data_[53],   // ksTo[0]
+                ee_data_[54],   // ksTo[1]
+                ee_data_[45],   // cpAlpha
+                ee_data_[256]); // alpha[0]
+            log(Logger::Level::DEBUG, debug_msg);
+        }
 
+        extractions_successful = MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_);
+    
+        if (logger_) {
+            char debug_msg[256];
+            snprintf(debug_msg, sizeof(debug_msg), 
+                "Critical params - ksTo[1]: %.6f, tgc: %.6f, cpAlpha: %.6f, alpha[0]: %.6f", 
+                calibration_parameters_.ksTo[1],
+                calibration_parameters_.tgc,
+                calibration_parameters_.cpAlpha,
+                calibration_parameters_.alpha[0]);
+            log(Logger::Level::DEBUG, debug_msg);
+        }
+    }
+
+    const bool success = extractions_successful && (error == 0);
+    return success ? 0 : -1;
 }
 
 int MLX90641Sensor::set_resolution(uint8_t resolution)
@@ -236,13 +302,19 @@ int MLX90641Sensor::set_resolution(uint8_t resolution)
     value = (resolution & 0x03) << 10;
     
     error = i2c_.read(i2c_addr_, 0x800D, 1, &control_register_1);
-    
+    if (error != 0)
+    {
+        log(Logger::Level::ERROR, "Failed to read control register for setting resolution");
+    } 
     if(error == 0)
     {
         value = (control_register_1 & 0xF3FF) | value;
         error = i2c_.write(i2c_addr_, 0x800D, value);        
     }    
-    
+    if (error != 0)
+    {
+        log(Logger::Level::ERROR, "Failed to write control register for setting resolution");
+    }
     return error;
 }
 
@@ -576,5 +648,12 @@ int MLX90641Sensor::check_eeprom_valid() const
      
      return -7;    
  }
+
+void MLX90641Sensor::log(Logger::Level level, const char* message)
+{
+    if (logger_) {
+        logger_->log(level, message);
+    }
+}
 
 } // namespace mlx90641

@@ -12,7 +12,7 @@ public:
     void beginTransmission(uint8_t address) override;
     uint8_t requestFrom(uint8_t address, std::size_t quantity) override;
     std::size_t write(uint8_t data) override;
-    std::size_t write(const uint8_t* data, std::size_t quantity) override;
+    std::size_t write(const char* data, std::size_t quantity) override;
     int available() override;
     int read() override;
     int peek() override;

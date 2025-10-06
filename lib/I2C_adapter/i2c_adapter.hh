@@ -25,7 +25,7 @@ public:
                        uint16_t value);
 
     // Initialize the I2C bus
-     bool init();
+     bool init(int freq);
 
     // Set I2C bus frequency in kHz
      void set_frequency(int freq);

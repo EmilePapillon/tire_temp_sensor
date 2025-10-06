@@ -13,7 +13,7 @@ public:
     virtual void beginTransmission(uint8_t address) = 0;
     virtual uint8_t requestFrom(uint8_t address, std::size_t quantity) = 0;
     virtual std::size_t write(uint8_t data) = 0;
-    virtual std::size_t write(const uint8_t* data, std::size_t quantity) = 0;
+    virtual std::size_t write(const char* data, std::size_t quantity) = 0;
     virtual int available() = 0;
     virtual int read() = 0;
     virtual int peek() = 0;

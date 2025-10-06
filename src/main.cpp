@@ -4,6 +4,7 @@
 #include "BLE_gatt.h"
 #include <bluefruit.h>
 #include "data_pack.hh"
+#include "arduino_logger.hh"
 
 // Replace #define with constexpr
 constexpr uint8_t mlx90641_i2c_addr = 0x33; // MLX90641 I2C address
@@ -21,31 +22,39 @@ float tempData[num_pixels];
 char rowBuf[512];
 Wire wire; 
 I2CAdapter i2c_adapter(wire);
-mlx90641::MLX90641Sensor mlx_sensor(i2c_adapter);
+ArduinoLogger logger;
+mlx90641::MLX90641Sensor mlx_sensor(i2c_adapter, mlx90641_i2c_addr, &logger);
 DataPack datapack;
+
 
 void setup() {
     Serial.begin(115200);
+    Serial.println("DEBUG: Starting setup...");
+    
+    Serial.println("DEBUG: Initializing MLX90641 sensor...");
     bool result = mlx_sensor.init();
     if (!result) {
-        Serial.println("Failed to initialize MLX90641!");
+        Serial.println("ERROR: Failed to initialize MLX90641!");
         while (1) delay(1000);
     }
-    Serial.println("MLX90641 ready.");
+    Serial.println("DEBUG: MLX90641 initialized successfully");
 
     delay(5000);
     // START UP BLUETOOTH
+    Serial.println("DEBUG: Starting Bluetooth...");
     Serial.print("Starting bluetooth with MAC address ");
     Bluefruit.begin();
     Bluefruit.getAddr(macaddr);
     Serial.printBufferReverse(macaddr, 6, ':');
     Serial.println();
     Bluefruit.setName("MLX90641");
+    Serial.println("DEBUG: Bluetooth initialized");
 
     // RUN BLUETOOTH GATT
+    Serial.println("DEBUG: Setting up GATT services...");
     setupMainService();
     startAdvertising(); 
-    Serial.println("Running!");
+    Serial.println("DEBUG: Setup complete - Running!");
 }
 
 
@@ -70,29 +79,44 @@ void sendColumnAveragesBLE(float* avgColumns16) {
 }
 
 void loop() {
+    Serial.println("DEBUG: Starting new loop iteration");
+    
     const int maxRetries = 5;   
     int retries = 0;
     bool frameSuccess = false;
 
+    Serial.println("DEBUG: Attempting to read frame...");
     while (!frameSuccess && retries < maxRetries) {
         frameSuccess = mlx_sensor.read_frame();
         if (!frameSuccess) {
             retries++;
+            Serial.print("DEBUG: Frame read failed, retry ");
+            Serial.print(retries);
+            Serial.print("/");
+            Serial.println(maxRetries);
             delay(1); // short delay before retry
         }
     }
 
     // If still failed after max retries, skip this iteration entirely
     if (!frameSuccess) {
-        Serial.println("Missed frame, all retries failed. Skipping notification.");
+        Serial.println("ERROR: Missed frame, all retries failed. Skipping notification.");
         return;
     }
-
+    
+    Serial.println("DEBUG: Frame read successful, calculating temperatures...");
     mlx_sensor.calculate_temps();
+    Serial.println("DEBUG: Temperature calculation complete");
+    
     auto tempData = mlx_sensor.get_temps();
+    Serial.println("DEBUG: Retrieved temperature array");
+    for (size_t i = 0; i < 10; i++) {
+        Serial.printf("%.2f, ", tempData[i]);
+    }
 
     Serial.write((uint8_t*)tempData.data(), tempData.size() * sizeof(float));
     
+    Serial.println("DEBUG: Calculating column averages...");
     // Row 0, pixels [0 .. 15]
     float colAvg[16];
     for (int col = 0; col < 16; col++) {
@@ -103,6 +127,8 @@ void loop() {
         colAvg[col] = sum / 12.0f;  // average of this column
     }    
 
+    Serial.println("DEBUG: Sending BLE data...");
     sendColumnAveragesBLE(colAvg);
+    Serial.println("DEBUG: Loop iteration complete");
     
 }

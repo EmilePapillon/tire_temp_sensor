@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "i2c_adapter.hh"
 #include "mlx90641_params.hh"
+#include "logger.hh"
 
 namespace mlx90641 {
 class MLX90641Sensor {
@@ -11,7 +12,7 @@ public:
     static constexpr size_t ee_data_size = 832;
     static constexpr size_t frame_data_size = 834;
 
-    MLX90641Sensor(I2CAdapter& i2c_adapter, uint8_t i2c_addr = 0x33);
+    MLX90641Sensor(I2CAdapter& i2c_adapter, uint8_t i2c_addr = 0x33, Logger* logger_ptr = nullptr);
 
     bool init();
     bool read_frame();
@@ -37,6 +38,7 @@ private:
     float get_emissivity() const;
     int extract_deviating_pixels();
     int check_eeprom_valid() const;
+    void log(Logger::Level level, const char* message);
 
     I2CAdapter& i2c_;
     uint8_t i2c_addr_;
@@ -45,6 +47,7 @@ private:
     std::array<float, num_pixels> temps_;
     ParamsMLX90641 calibration_parameters_;
     float ambient_;
+    Logger* logger_; 
 
 };
 } // namespace mlx90641
