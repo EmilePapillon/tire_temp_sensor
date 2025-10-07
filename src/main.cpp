@@ -22,7 +22,7 @@ float tempData[num_pixels];
 char rowBuf[512];
 Wire wire; 
 I2CAdapter i2c_adapter(wire);
-ArduinoLogger logger;
+ArduinoLogger logger(Logger::Level::INFO); // Change to DEBUG for more verbosity
 mlx90641::MLX90641Sensor mlx_sensor(i2c_adapter, mlx90641_i2c_addr, &logger);
 DataPack datapack;
 
