@@ -14,18 +14,18 @@ public:
      ~I2CAdapter() = default;
 
     // Read `length` 16-bit words starting from `start_register`
-     bool read(uint8_t device_address,
+     int read(uint8_t device_address,
                       uint16_t start_register,
                       std::size_t length,
                       uint16_t* buffer);
 
     // Write a 16-bit word to a register
-     bool write(uint8_t device_address,
+     int write(uint8_t device_address,
                        uint16_t reg,
                        uint16_t value);
 
     // Initialize the I2C bus
-     bool init(int freq);
+     int init(int freq);
 
     // Set I2C bus frequency in kHz
      void set_frequency(int freq);

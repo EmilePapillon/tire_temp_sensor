@@ -1,17 +1,17 @@
 #include "i2c_adapter.hh"
 
-bool I2CAdapter::init(int freq) {
+int I2CAdapter::init(int freq) {
     wire_.begin();
     wire_.setClock(1000 * freq); // freq in kHz
     wire_.delayMicroseconds(1000); // wait for 5 ms
-    return true;
+    return 0;
 }
 
 void I2CAdapter::set_frequency(int freq) {
     wire_.setClock(1000 * freq); // freq in kHz
 } 
 
-bool I2CAdapter::read(uint8_t device_address,
+int I2CAdapter::read(uint8_t device_address,
                       uint16_t start_register,
                       std::size_t length,
                       uint16_t* buffer) {
@@ -38,14 +38,14 @@ bool I2CAdapter::read(uint8_t device_address,
         int written2 = wire_.write(cmd[1]);
         
         int end = wire_.endTransmission(0);
-        if(end == 2 || end == 3) return false;
-        if(end == 1 || end == 4) return false;
+        if(end == 2 || end == 3) return -1;
+        if(end == 1 || end == 4) return -2;
             
         int num_bytes = div;
         if(j == (factor-1) && remainder!=0) num_bytes = remainder;
             
         num_bytes = wire_.requestFrom((int)device_address,num_bytes);
-        if(!num_bytes) return false;
+        if(!num_bytes) return -1;
         
         for(int i = 0 ; i < num_bytes/2 ; i++){
             if(wire_.available()){		
@@ -55,10 +55,10 @@ bool I2CAdapter::read(uint8_t device_address,
             }
         }
     }
-    return true;
+    return 0;
 }
 
-bool I2CAdapter::write(uint8_t device_address,
+int I2CAdapter::write(uint8_t device_address,
                        uint16_t reg,
                        uint16_t value) {
     char cmd[4] = {0,0,0,0};
@@ -78,12 +78,12 @@ bool I2CAdapter::write(uint8_t device_address,
     
     wire_.endTransmission(); 
     
-    if(!read(device_address, reg, 1, &dataCheck)) return false;
+    if(read(device_address, reg, 1, &dataCheck) != 0) return -1;
     
     if ( dataCheck != value)
     {
-        return false;
+        return -2;
     }    
     
-    return true;
+    return 0;
 }

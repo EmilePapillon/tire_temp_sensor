@@ -19,7 +19,7 @@ bool MLX90641Sensor::init()
     log(Logger::Level::DEBUG, "Starting MLX90641 sensor initialization");
     
     log(Logger::Level::DEBUG, "Initializing I2C adapter");
-    if (!i2c_.init(400)) {
+    if (i2c_.init(400) != 0) {
         log(Logger::Level::ERROR, "Failed to initialize I2C adapter");
         return false;
     }
@@ -72,7 +72,7 @@ bool MLX90641Sensor::init()
 
 bool MLX90641Sensor::read_frame()
 {
-    if (get_frame_data() < 0)
+    if (get_frame_data() != 0)
         return false;
     ambient_ = get_ta();
     return true;
@@ -100,12 +100,11 @@ float MLX90641Sensor::get_ambient() const
 
 int MLX90641Sensor::dump_ee()
 {
-    bool success = i2c_.read(i2c_addr_, 0x2400, 832, ee_data_.data());
+    int error = i2c_.read(i2c_addr_, 0x2400, 832, ee_data_.data());
     
-    int hamming_decode_error_code = 0;
-    if (success)
-        hamming_decode_error_code = hamming_decode();
-    return success ? hamming_decode_error_code : -1;
+    if (error == 0)
+        error = hamming_decode();
+    return error;
 }
 
 int MLX90641Sensor::hamming_decode()
