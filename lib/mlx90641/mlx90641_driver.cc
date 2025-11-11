@@ -2,6 +2,7 @@
 #include "mlx90641_eeprom_parser.hh"
 #include <cstring>
 #include <cmath>
+#include <cstdio>
 
 namespace mlx90641 {
 
