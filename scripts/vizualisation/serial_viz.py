@@ -1,10 +1,11 @@
+import argparse
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 import serial
 
 # -------- CONFIG ----------
-COM_PORT = "/dev/cu.usbserial-0247185B"
+DEFAULT_COM_PORT = "/dev/cu.usbserial-0247185B"
 BAUDRATE = 115200
 ROWS, COLS = 12, 16
 BYTES_PER_FRAME = ROWS * COLS * 4  # 192 floats * 4 bytes
@@ -13,7 +14,14 @@ MAX_TEMP = 150.0
 VMIN, VMAX = 20, 50  # initial color scale
 # --------------------------
 
-ser = serial.Serial(COM_PORT, BAUDRATE, timeout=0.05)
+parser = argparse.ArgumentParser(description="Live thermal heatmap from serial frames.")
+parser.add_argument("-p", "--port", default=DEFAULT_COM_PORT,
+                     help=f"Serial port to read from (default: {DEFAULT_COM_PORT})")
+parser.add_argument("-b", "--baudrate", type=int, default=BAUDRATE,
+                     help=f"Baud rate (default: {BAUDRATE})")
+args = parser.parse_args()
+
+ser = serial.Serial(args.port, args.baudrate, timeout=0.05)
 buf = bytearray()
 
 running = True
