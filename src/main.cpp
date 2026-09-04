@@ -15,6 +15,12 @@ constexpr size_t num_pixels = 192u;  // 16x12
 constexpr float temp_scaling = 1.00f; // Default = 1.00
 constexpr int temp_offset = 0;       // Default = 0 (in tenths of degrees Celsius)
 
+// Verbose per-loop debug prints share the UART with the binary temperature
+// frame (see Serial.write below), so leaving them on corrupts the frame
+// boundary that downstream consumers scan for. Keep false unless actively
+// debugging the loop with nothing reading the binary stream.
+constexpr bool loop_debug_verbose = false;
+
 uint8_t macaddr[6]; 
 uint16_t eeData[ee_data_size];
 uint16_t frameData[frame_data_size];
@@ -79,21 +85,23 @@ void sendColumnAveragesBLE(float* avgColumns16) {
 }
 
 void loop() {
-    Serial.println("DEBUG: Starting new loop iteration");
-    
-    const int maxRetries = 5;   
+    if (loop_debug_verbose) Serial.println("DEBUG: Starting new loop iteration");
+
+    const int maxRetries = 5;
     int retries = 0;
     bool frameSuccess = false;
 
-    Serial.println("DEBUG: Attempting to read frame...");
+    if (loop_debug_verbose) Serial.println("DEBUG: Attempting to read frame...");
     while (!frameSuccess && retries < maxRetries) {
         frameSuccess = mlx_sensor.read_frame();
         if (!frameSuccess) {
             retries++;
-            Serial.print("DEBUG: Frame read failed, retry ");
-            Serial.print(retries);
-            Serial.print("/");
-            Serial.println(maxRetries);
+            if (loop_debug_verbose) {
+                Serial.print("DEBUG: Frame read failed, retry ");
+                Serial.print(retries);
+                Serial.print("/");
+                Serial.println(maxRetries);
+            }
             delay(1); // short delay before retry
         }
     }
@@ -103,20 +111,22 @@ void loop() {
         Serial.println("ERROR: Missed frame, all retries failed. Skipping notification.");
         return;
     }
-    
-    Serial.println("DEBUG: Frame read successful, calculating temperatures...");
+
+    if (loop_debug_verbose) Serial.println("DEBUG: Frame read successful, calculating temperatures...");
     mlx_sensor.calculate_temps();
-    Serial.println("DEBUG: Temperature calculation complete");
-    
+    if (loop_debug_verbose) Serial.println("DEBUG: Temperature calculation complete");
+
     auto tempData = mlx_sensor.get_temps();
-    Serial.println("DEBUG: Retrieved temperature array");
-    for (size_t i = 0; i < 10; i++) {
-        Serial.printf("%.2f, ", tempData[i]);
+    if (loop_debug_verbose) {
+        Serial.println("DEBUG: Retrieved temperature array");
+        for (size_t i = 0; i < 10; i++) {
+            Serial.printf("%.2f, ", tempData[i]);
+        }
     }
 
     Serial.write((uint8_t*)tempData.data(), tempData.size() * sizeof(float));
-    
-    Serial.println("DEBUG: Calculating column averages...");
+
+    if (loop_debug_verbose) Serial.println("DEBUG: Calculating column averages...");
     // Row 0, pixels [0 .. 15]
     float colAvg[16];
     for (int col = 0; col < 16; col++) {
@@ -125,10 +135,10 @@ void loop() {
             sum += tempData[row * 16 + col];  // row-major order
         }
         colAvg[col] = sum / 12.0f;  // average of this column
-    }    
+    }
 
-    Serial.println("DEBUG: Sending BLE data...");
+    if (loop_debug_verbose) Serial.println("DEBUG: Sending BLE data...");
     sendColumnAveragesBLE(colAvg);
-    Serial.println("DEBUG: Loop iteration complete");
-    
+    if (loop_debug_verbose) Serial.println("DEBUG: Loop iteration complete");
+
 }
