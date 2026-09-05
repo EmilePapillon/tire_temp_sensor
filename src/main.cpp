@@ -15,10 +15,6 @@ constexpr size_t num_pixels = 192u;  // 16x12
 constexpr float temp_scaling = 1.00f; // Default = 1.00
 constexpr int temp_offset = 0;       // Default = 0 (in tenths of degrees Celsius)
 
-// Verbose per-loop debug prints share the UART with the binary temperature
-// frame (see Serial.write below), so leaving them on corrupts the frame
-// boundary that downstream consumers scan for. Keep false unless actively
-// debugging the loop with nothing reading the binary stream.
 constexpr bool loop_debug_verbose = false;
 
 uint8_t macaddr[6]; 
