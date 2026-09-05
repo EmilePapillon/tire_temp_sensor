@@ -11,23 +11,29 @@ CHAR_UUID = "00000001-0000-1000-8000-00805f9b34fb"
 
 FULL_COLUMNS = 16
 full_buffer = [0.0] * FULL_COLUMNS  # 16-column averaged temperatures
+VMIN, VMAX = 20, 40  # fixed color scale, degrees Celsius
 
 # Global flag for window status
 window_closed = asyncio.Event()
 
+# Plot objects, created once in main() and updated in place thereafter.
+fig = None
+im = None
+
 def update_plot():
-    """Update live heatmap plot."""
-    plt.clf()
-    plt.imshow([full_buffer], cmap="inferno", aspect="auto")
-    plt.colorbar(label="°C")
-    plt.title("16-column Thermal Strip")
-    plt.yticks([])
-    plt.xticks(range(FULL_COLUMNS))
-    plt.pause(0.01)
+    """Update live heatmap plot in place (no new figures, no window churn)."""
+    if window_closed.is_set() or not plt.fignum_exists(fig.number):
+        return
+    im.set_data([full_buffer])
+    fig.canvas.draw_idle()
+    fig.canvas.flush_events()
 
 def notification_handler(_, data):
     """Handle incoming BLE notifications."""
     global full_buffer
+
+    if window_closed.is_set():
+        return
 
     if len(data) != 19:
         print(f"Unexpected packet length: {len(data)}")
@@ -48,7 +54,7 @@ def on_close(event):
     window_closed.set()  # trigger async shutdown
 
 async def main():
-    global window_closed
+    global window_closed, fig, im
 
     print("Scanning for BLE device...")
     devices = await BleakScanner.discover()
@@ -61,10 +67,16 @@ async def main():
         print("Connected to", DEVICE_NAME)
         await client.start_notify(CHAR_UUID, notification_handler)
 
-        # Setup live plotting
+        # Setup live plotting (created once; notification_handler only mutates it)
         plt.ion()
         fig = plt.figure(figsize=(8, 2))
         fig.canvas.mpl_connect("close_event", on_close)
+        ax = fig.add_subplot()
+        im = ax.imshow([full_buffer], cmap="inferno", aspect="auto", vmin=VMIN, vmax=VMAX)
+        fig.colorbar(im, ax=ax, label="°C")
+        ax.set_title("16-column Thermal Strip")
+        ax.set_yticks([])
+        ax.set_xticks(range(FULL_COLUMNS))
 
         # Wait until window is closed
         await window_closed.wait()
