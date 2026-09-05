@@ -8,7 +8,7 @@ This project is firmware for an Adafruit Feather nRF52832 board that reads tire 
 2. **Connect your Adafruit Feather nRF52832 via USB.**
 3. **Build and upload the firmware:**
    ```sh
-   pio run --target upload
+   pio run -e adafruit_feather_nrf52832 --target upload
    ```
 
 ## Contributing
@@ -19,7 +19,7 @@ To contribute to this repository:
 2. Request a review from a project maintainer.
 3. Ensure your changes have unit test coverage.
 4. Verify that your changes do not break the build.
-5. Make sure all unit tests are passing.'
+5. Make sure all unit tests are passing.
 
 ## Coding guidelines
 
