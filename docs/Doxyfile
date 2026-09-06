@@ -8,10 +8,14 @@
 PROJECT_NAME           = "tire_temp_sensor"
 PROJECT_BRIEF          = "MLX90641 tire temperature sensor firmware for the Adafruit Feather nRF52832"
 OUTPUT_DIRECTORY       = docs/api
-INPUT                  = README.md test/README.md scripts/vizualisation/README.md \
-                         lib include src test/mocks test/fixtures
+INPUT                  = README.md lib include src test/mocks test/fixtures
 USE_MDFILE_AS_MAINPAGE = README.md
 MARKDOWN_ID_STYLE      = GITHUB
+# test/mocks and test/fixtures are header-only and #include their .inl/.inc
+# siblings by a path relative to test/ (matching how PlatformIO's
+# CPPPATH=[$PROJECT_TEST_DIR] resolves the same includes for real
+# compilation) -- tell Doxygen's preprocessor to search there too.
+INCLUDE_PATH           = test
 FILE_PATTERNS          = *.hh *.inl *.cc *.cpp *.md
 RECURSIVE              = YES
 EXTENSION_MAPPING      = inl=C++

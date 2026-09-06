@@ -121,7 +121,7 @@ The API reference is published to GitHub Pages from `main` by `.github/workflows
 
 ## Visualization tooling
 
-[`scripts/vizualisation/`](scripts/vizualisation/README.md) contains `serial_viz.py` (full 12x16 heatmap from the serial frame stream) and `ble.py` (what a RaceChrono-style consumer sees, auto-detecting the protocol from the advertisement). The BLE decoders mirror the firmware's protocol split and have their own unit tests.
+`scripts/vizualisation/` (see its own README) contains `serial_viz.py` (full 12x16 heatmap from the serial frame stream) and `ble.py` (what a RaceChrono-style consumer sees, auto-detecting the protocol from the advertisement). The BLE decoders mirror the firmware's protocol split and have their own unit tests.
 
 ## Contributing
 
