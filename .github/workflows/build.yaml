@@ -36,5 +36,5 @@ jobs:
 
       - name: Check API documentation
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq doxygen
+          sudo apt-get update -qq && sudo apt-get install -y -qq doxygen graphviz
           doxygen docs/Doxyfile

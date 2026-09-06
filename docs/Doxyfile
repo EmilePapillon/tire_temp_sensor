@@ -30,6 +30,11 @@ MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = YES
 PREDEFINED             = "__attribute__(x)=" "__has_include(x)=0"
 
+# Explicit, not left to the packaged default: Debian/Ubuntu's doxygen ships
+# with HAVE_DOT baked in as YES (unlike Homebrew's), which fails hard if
+# graphviz isn't installed alongside it. Both CI jobs install graphviz.
+HAVE_DOT               = YES
+
 GENERATE_HTML          = YES
 GENERATE_LATEX         = NO
 SOURCE_BROWSER         = YES

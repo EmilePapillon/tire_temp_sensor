@@ -68,7 +68,9 @@ def on_close(event):
 
 fig.canvas.mpl_connect("close_event", on_close)
 
+plt.ion()
 plt.show(block=False)
+plt.pause(0.001)  # let the window actually map before we start waiting on serial data
 
 frame_count = 0
 t0 = time.time()
@@ -76,13 +78,14 @@ fps = 0.0
 
 try:
     while running:
+        if not plt.fignum_exists(fig.number):
+            break
+
         # read any available bytes (non-blocking-ish)
         n = ser.in_waiting
         if n:
             chunk = ser.read(n)
             buf.extend(chunk)
-        else:
-            time.sleep(0.001)
 
         # consume every complete magic-prefixed frame in the buffer
         while True:
@@ -126,11 +129,15 @@ try:
                 ax1.set_title(f"Full Heatmap min:{matrix.min():.2f} max:{matrix.max():.2f} fps:{fps:.1f}")
 
             fig.canvas.draw_idle()
-            plt.pause(0.001)
 
         # avoid unbounded buffer growth if no magic ever shows up
         if len(buf) > 10 * BYTES_PER_FRAME:
             del buf[:-10 * BYTES_PER_FRAME]
+
+        # pump the GUI event loop every iteration, not just when a frame decoded,
+        # or the window never maps on backends (e.g. macosx) that need an explicit
+        # tick to show themselves -- this also serves as our loop's idle sleep.
+        plt.pause(0.001)
 
 except KeyboardInterrupt:
     print("\nInterrupted by user")
