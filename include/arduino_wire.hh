@@ -28,6 +28,7 @@ public:
     void begin();
 
     /// @brief Outcome of the recovery check. Valid after begin().
+    /// @return NotNeeded if the bus was idle, Recovered if SDA was freed, Failed if it is still low.
     BusRecovery recovery() const;
 
     /// @brief Set the bus clock.

@@ -31,7 +31,8 @@ ArduinoWire wire;                                   ///< The I2C bus.
 I2CAdapter<ArduinoWire> i2c_adapter(wire);          ///< Register-level access over the bus.
 /// The thermal sensor, logging through Serial.
 mlx90641::MLX90641Sensor<I2CAdapter<ArduinoWire>, ArduinoLogger> mlx_sensor(i2c_adapter, config::mlx90641_i2c_addr);
-/// Radio settings: the config.hh tunables plus the active protocol's notify burst.
+/// @brief Radio settings: the config.hh tunables plus the active protocol's notify burst.
+/// @return config::ble_peripheral with notify_burst overlaid from ActiveBleProtocol.
 constexpr ble::PeripheralConfig peripheral_config() {
     ble::PeripheralConfig cfg = config::ble_peripheral;
     cfg.notify_burst = config::ActiveBleProtocol::notifications_per_publish;
