@@ -1,19 +1,27 @@
+import argparse
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 import serial
 
 # -------- CONFIG ----------
-COM_PORT = "/dev/cu.usbserial-0247185B"
+DEFAULT_COM_PORT = "/dev/cu.usbserial-0247185B"
 BAUDRATE = 115200
 ROWS, COLS = 12, 16
 BYTES_PER_FRAME = ROWS * COLS * 4  # 192 floats * 4 bytes
 MIN_TEMP = -40.0   # validation range
 MAX_TEMP = 150.0
-VMIN, VMAX = 20, 50  # initial color scale
+VMIN, VMAX = 20, 40  # fixed color scale, degrees Celsius (matches ble.py)
 # --------------------------
 
-ser = serial.Serial(COM_PORT, BAUDRATE, timeout=0.05)
+parser = argparse.ArgumentParser(description="Live thermal heatmap from serial frames.")
+parser.add_argument("-p", "--port", default=DEFAULT_COM_PORT,
+                     help=f"Serial port to read from (default: {DEFAULT_COM_PORT})")
+parser.add_argument("-b", "--baudrate", type=int, default=BAUDRATE,
+                     help=f"Baud rate (default: {BAUDRATE})")
+args = parser.parse_args()
+
+ser = serial.Serial(args.port, args.baudrate, timeout=0.05)
 buf = bytearray()
 
 running = True
@@ -80,14 +88,12 @@ try:
                 # reshape full matrix
                 matrix = arr.reshape((ROWS, COLS))
 
-                # --- Full heatmap update ---
-                im1.set_clim(vmin=np.min(matrix), vmax=np.max(matrix))
+                # --- Full heatmap update (fixed VMIN/VMAX color scale, set once above) ---
                 im1.set_data(matrix)
 
                 # --- Column-average heatmap ---
                 col_avg = np.mean(matrix, axis=0)  # 16 values
                 col_matrix = np.tile(col_avg, (ROWS, 1))  # replicate for display
-                im2.set_clim(vmin=np.min(col_matrix), vmax=np.max(col_matrix))
                 im2.set_data(col_matrix)
 
                 # Update titles
