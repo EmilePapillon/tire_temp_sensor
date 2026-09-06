@@ -11,7 +11,14 @@ bool BluefruitBlePeripheral::begin() {
         Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT, event_len, static_cast<uint8_t>(config_.notify_burst),
                                  BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
     }
-    return Bluefruit.begin();
+    if (!Bluefruit.begin()) {
+        return false;
+    }
+    if (config_.conn_interval_min != 0 && config_.conn_interval_max != 0) {
+        // Preferred interval the central is asked to honour; needs the SoftDevice up.
+        return Bluefruit.Periph.setConnInterval(config_.conn_interval_min, config_.conn_interval_max);
+    }
+    return true;
 }
 
 void BluefruitBlePeripheral::set_device_name(const char* name) {

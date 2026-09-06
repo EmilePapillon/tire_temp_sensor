@@ -47,6 +47,8 @@ struct CharacteristicProps {
 /// @brief Radio bring-up settings, passed to the concrete peripheral at construction.
 struct PeripheralConfig {
     std::size_t notify_burst = 1;  ///< Back-to-back notify() calls per publish cycle; sizes the TX queue.
+    uint16_t conn_interval_min = 0;  ///< Preferred connection interval floor, 1.25 ms units; 0 = stack default.
+    uint16_t conn_interval_max = 0;  ///< Preferred connection interval ceiling, 1.25 ms units; 0 = stack default.
 };
 
 /// @brief Radio-level advertising settings, owned by config.hh.
