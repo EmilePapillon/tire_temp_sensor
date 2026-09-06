@@ -59,6 +59,22 @@ void test_alpha() {
     }
 }
 
+void test_alpha_scale_preserves_sixth_bit() {
+    auto data = test_eeprom_data;
+    constexpr std::size_t alpha_scale0_index = EepromAddr::alpha_scale0 - eeprom_start_address;
+    data[alpha_scale0_index] = static_cast<uint16_t>((data[alpha_scale0_index] & 0x001F) | (32U << 5));
+
+    MLX90641EEpromParser parser(data);
+    const auto alpha = parser.get_alpha();
+    const auto row_max = static_cast<float>(data[EepromAddr::alpha_max_row0 - eeprom_start_address] & 0x07FF);
+    const auto pixel_alpha = static_cast<float>(data[EepromAddr::alpha_pixel - eeprom_start_address] & 0x07FF);
+    const auto expected = pixel_alpha * (row_max / static_cast<float>(1ULL << 52U)) / 2047.0f;
+
+    // Relative tolerance: with the sixth bit set the scale exponent is 52, so expected is
+    // ~2e-13 and an absolute 1e-4 window would pass for almost any alpha[0].
+    TEST_ASSERT_FLOAT_WITHIN(expected * 1e-4f, expected, alpha[0]);
+}
+
 void test_kta() {
     const auto kta = eeprom->get_kta();
     for (size_t i = 0; i < kta.size(); ++i) {
@@ -154,6 +170,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_ks_ta);
     RUN_TEST(test_ks_to);
     RUN_TEST(test_alpha);
+    RUN_TEST(test_alpha_scale_preserves_sixth_bit);
     RUN_TEST(test_kta);
     RUN_TEST(test_kv);
     RUN_TEST(test_cp_kv);

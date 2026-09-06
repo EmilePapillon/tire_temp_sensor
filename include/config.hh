@@ -56,6 +56,13 @@ constexpr mlx90641::Mlx90641Config mlx90641_config{
     mlx90641_refresh_rate,         // frame rate
     50000,                         // status-register polls before a frame read gives up (~5 s at 400 kHz)
 };
+/// Use the sensor's EEPROM emissivity unless a deployment-specific value is calibrated.
+constexpr bool mlx90641_use_eeprom_emissivity = false;
+/// Effective emissivity used when mlx90641_use_eeprom_emissivity is false.
+constexpr float mlx90641_emissivity = 0.95f;
+// calculate_to() divides by this value; a zero or out-of-range setting yields NaN/inf frames.
+static_assert(mlx90641_emissivity > 0.0f && mlx90641_emissivity <= 1.0f,
+              "mlx90641_emissivity must be in (0, 1]");
 /// Frame read attempts per loop() before the iteration is skipped.
 constexpr uint8_t frame_read_max_retries = 5;
 

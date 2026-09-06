@@ -1,5 +1,6 @@
 // Inline definitions for mock_wire.hh. Included by the header; do not include directly.
 #pragma once
+#include <algorithm>
 
 inline void MockWire::begin() { begun = true; }
 
@@ -22,7 +23,7 @@ inline int MockWire::end_transmission(bool /*stop*/) {
     }
     if (tx_.size() == 4) {
         registers[selected_register_] = static_cast<uint16_t>(((tx_[2] << 8) | tx_[3]) & write_mask);
-        return 0;
+        return write_end_transmission_status;
     }
     return tx_.size() == 2 ? end_transmission_status : 0;
 }
@@ -32,14 +33,16 @@ inline std::size_t MockWire::request_from(uint8_t /*address*/, std::size_t quant
     if (fail_request) {
         return 0;
     }
-    for (std::size_t i = 0; i < quantity / 2; i++) {
+    const std::size_t response_bytes =
+        (short_response_bytes == 0) ? quantity : std::min(short_response_bytes, quantity);
+    for (std::size_t i = 0; i < response_bytes / 2; i++) {
         const auto it = registers.find(selected_register_);
         const uint16_t word = (it == registers.end()) ? 0 : it->second;
         rx_.push_back(static_cast<uint8_t>(word >> 8));
         rx_.push_back(static_cast<uint8_t>(word & 0xFF));
         selected_register_++;
     }
-    return quantity;
+    return response_bytes;
 }
 
 inline std::size_t MockWire::write(uint8_t data) {

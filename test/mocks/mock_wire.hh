@@ -15,14 +15,16 @@
 /// - a 4-byte transmission writes a word to a register,
 /// - request_from() serves consecutive words from the selected register.
 ///
-/// Knobs (end_transmission_status, fail_request, write_mask) inject the
+/// Knobs (end_transmission_status, fail_request, short_response_bytes, write_mask) inject the
 /// failure modes the adapter is expected to translate into error codes.
 class MockWire {
 public:
     // --- scripting -----------------------------------------------------------
     std::map<uint16_t, uint16_t> registers;  ///< Register file served to reads; missing = 0.
     int end_transmission_status = 0;         ///< Returned after a register-select (2-byte) transmission.
+    int write_end_transmission_status = 0;   ///< Returned after a register write (4-byte) transmission.
     bool fail_request = false;               ///< Make request_from() return 0 bytes.
+    std::size_t short_response_bytes = 0;     ///< Return fewer bytes than requested when nonzero.
     uint16_t write_mask = 0xFFFF;            ///< Bits the "device" actually stores on write.
 
     // --- recording -----------------------------------------------------------
@@ -47,7 +49,7 @@ public:
     /// @brief Queue @p quantity bytes of consecutive words starting at the selected register.
     /// @param address Ignored.
     /// @param quantity Bytes requested.
-    /// @return @p quantity, or 0 when fail_request is set.
+    /// @return @p quantity, fewer bytes when short_response_bytes is set, or 0 when fail_request is set.
     std::size_t request_from(uint8_t address, std::size_t quantity);
     /// @brief Append one byte to the open transaction.
     /// @param data The byte.

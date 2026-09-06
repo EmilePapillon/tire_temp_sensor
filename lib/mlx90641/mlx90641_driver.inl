@@ -119,6 +119,17 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps() {
 }
 
 template <typename I2CAdapterT, typename LoggerT>
+void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity) {
+    calculate_temps(emissivity, ambient_);
+}
+
+template <typename I2CAdapterT, typename LoggerT>
+void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity, float reflected_temperature_c) {
+    calculate_to(emissivity, reflected_temperature_c);
+    bad_pixels_correction();
+}
+
+template <typename I2CAdapterT, typename LoggerT>
 std::array<float, MLX90641Sensor<I2CAdapterT, LoggerT>::num_pixels>
 MLX90641Sensor<I2CAdapterT, LoggerT>::get_temps() const {
     return temps_;

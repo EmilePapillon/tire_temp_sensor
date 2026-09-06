@@ -97,6 +97,15 @@ void test_read_reports_no_data() {
     assert_status(I2cStatus::NoData, adapter->read(device_addr, 0x800D, 1, &word));
 }
 
+void test_read_reports_short_response_instead_of_returning_partial_data() {
+    wire->registers[0x800D] = 0x1234;
+    wire->short_response_bytes = 1;
+    uint16_t word = 0xBEEF;
+
+    assert_status(I2cStatus::NoData, adapter->read(device_addr, 0x800D, 1, &word));
+    TEST_ASSERT_EQUAL_HEX16(0xBEEF, word);
+}
+
 void test_write_sends_register_and_value_then_verifies() {
     assert_status(I2cStatus::Success, adapter->write(device_addr, 0x800D, 0xBEEF));
 
@@ -119,6 +128,14 @@ void test_write_reports_readback_failure() {
     assert_status(I2cStatus::NoData, adapter->write(device_addr, 0x800D, 0xBEEF));
 }
 
+void test_write_reports_transmit_failure() {
+    wire->write_end_transmission_status = 2;  // address NACK
+    assert_status(I2cStatus::Nack, adapter->write(device_addr, 0x800D, 0xBEEF));
+
+    wire->write_end_transmission_status = 5;  // timeout
+    assert_status(I2cStatus::BusError, adapter->write(device_addr, 0x800D, 0xBEEF));
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_init_starts_bus_at_requested_frequency);
@@ -127,8 +144,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_read_reports_nack);
     RUN_TEST(test_read_reports_bus_error);
     RUN_TEST(test_read_reports_no_data);
+    RUN_TEST(test_read_reports_short_response_instead_of_returning_partial_data);
     RUN_TEST(test_write_sends_register_and_value_then_verifies);
     RUN_TEST(test_write_reports_readback_mismatch);
     RUN_TEST(test_write_reports_readback_failure);
+    RUN_TEST(test_write_reports_transmit_failure);
     return UNITY_END();
 }

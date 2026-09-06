@@ -18,7 +18,7 @@ enum class I2cStatus : uint8_t {
     Success = 0,     ///< The operation completed.
     Nack,            ///< The device did not acknowledge its address or a data byte.
     BusError,        ///< Transmit buffer overflow, timeout or other bus-level failure.
-    NoData,          ///< The device returned no bytes on a read.
+    NoData,          ///< The device returned fewer bytes than requested on a read.
     VerifyMismatch,  ///< A write's read-back differed from the written value.
 };
 

@@ -216,6 +216,22 @@ void test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0() {
     }
 }
 
+void test_calculate_temps_accepts_deployment_emissivity() {
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto blackbody_temps = sensor->get_temps();
+
+    sensor->calculate_temps(0.90f);
+    const auto tire_temps = sensor->get_temps();
+
+    // The correction must materially respond to the deployment setting.
+    TEST_ASSERT_TRUE(std::fabs(tire_temps[191] - blackbody_temps[191]) > 0.01f);
+    for (float temperature : tire_temps) {
+        TEST_ASSERT_TRUE(std::isfinite(temperature));
+    }
+}
+
 // ---------------------------------------------------------------- helpers
 
 void test_column_averages_average_each_column_over_all_rows() {
@@ -260,6 +276,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_read_frame_reports_bus_error);
     RUN_TEST(test_calculate_temps_reproduces_reference_frame);
     RUN_TEST(test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0);
+    RUN_TEST(test_calculate_temps_accepts_deployment_emissivity);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();
