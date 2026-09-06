@@ -1,3 +1,9 @@
+"""Live 12x16 thermal heatmap from the firmware's raw serial frame stream.
+
+Frames arrive as the 4-byte magic AA 55 'T' 'T' followed by 192 little-endian
+float32 values (see include/serial_frame_stream.hh); the loop below synchronises
+on the magic so interleaved text logs are skipped.
+"""
 import argparse
 import time
 import numpy as np
@@ -52,6 +58,7 @@ ax2.set_title("Column Average Heatmap")
 
 # --- HANDLE FIGURE CLOSE ---
 def on_close(event):
+    """Figure close handler: stop the read loop and release the port."""
     global running
     print("\nFigure closed — exiting...")
     running = False

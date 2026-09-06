@@ -1,6 +1,8 @@
-// Composition root: construct the concrete pieces, wire them together, run.
-// Protocol framing, naming and GATT setup live in lib/ble_protocol; board glue
-// in include/. Tunables live in config.hh.
+/// @file main.cpp
+/// @brief Composition root: construct the concrete pieces, wire them together, run.
+///
+/// Protocol framing, naming and GATT setup live in lib/ble_protocol; board glue
+/// in include/. Tunables live in config.hh.
 #include <Arduino.h>
 #include <cstdio>
 #include "arduino_logger.hh"
@@ -19,22 +21,26 @@
 #if __has_include("build_info.hh")
 #include "build_info.hh"
 #else
+/// @brief Fallback revision string when the build stamp was not generated.
 #define BUILD_VERSION "unknown"
 #endif
 
 namespace {
 
-ArduinoWire wire;
-I2CAdapter<ArduinoWire> i2c_adapter(wire);
+ArduinoWire wire;                                   ///< The I2C bus.
+I2CAdapter<ArduinoWire> i2c_adapter(wire);          ///< Register-level access over the bus.
+/// The thermal sensor, logging through Serial.
 mlx90641::MLX90641Sensor<I2CAdapter<ArduinoWire>, ArduinoLogger> mlx_sensor(i2c_adapter, config::mlx90641_i2c_addr);
-BluefruitBlePeripheral peripheral;
+BluefruitBlePeripheral peripheral;                  ///< The BLE radio.
+/// The wire protocol selected in config.hh, driving the radio.
 config::ActiveBleProtocol ble_protocol(peripheral, config::ble_advertising);
-ArduinoLogger logger;
-TireTelemetry telemetry{};
+ArduinoLogger logger;                               ///< Logger for main.cpp's own messages.
+TireTelemetry telemetry{};                          ///< The sample being assembled for publish().
 
-// Refresh the battery fields of `telemetry` from the ADC. Reads once on the
-// first call, then at most every config::battery_refresh_ms. Unsigned
-// subtraction keeps this correct across the 49-day millis() wraparound.
+/// @brief Refresh the battery fields of `telemetry` from the ADC.
+///
+/// Reads once on the first call, then at most every config::battery_refresh_ms.
+/// Unsigned subtraction keeps this correct across the 49-day millis() wraparound.
 void refresh_battery() {
     static bool read_once = false;
     static uint32_t last_read_ms = 0;
@@ -48,6 +54,8 @@ void refresh_battery() {
     telemetry.battery_pct = battery_lipo_percent(telemetry.battery_mv);
 }
 
+/// @brief Read one frame, retrying up to config::frame_read_max_retries times.
+/// @return True if a frame was acquired.
 bool read_frame_with_retries() {
     for (uint8_t attempt = 1; attempt <= config::frame_read_max_retries; attempt++) {
         watchdog_feed();  // a frame read may legitimately take several seconds to time out
@@ -64,7 +72,8 @@ bool read_frame_with_retries() {
     return false;
 }
 
-// Log the reason and stop feeding the watchdog: the board resets itself.
+/// @brief Log the reason and stop feeding the watchdog: the board resets itself.
+/// @param reason Message logged at ERROR level.
 void halt(const char* reason) {
     logger.log(LogLevel::ERROR, reason);
     logger.log(LogLevel::ERROR, "Halting; the watchdog will reset the board.");
@@ -75,6 +84,7 @@ void halt(const char* reason) {
 
 }  // namespace
 
+/// @brief Arduino entry point: arm the watchdog, bring up sensor, battery and BLE.
 void setup() {
     watchdog_begin(config::watchdog_timeout_s);
 
@@ -118,6 +128,7 @@ void setup() {
     logger.log(LogLevel::INFO, "Setup complete - Running!");
 }
 
+/// @brief Arduino main loop: one frame in, one telemetry sample out.
 void loop() {
     watchdog_feed();
 

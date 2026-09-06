@@ -1,68 +1,131 @@
 # Tire Temperature Sensor BLE Firmware
 
-This project is firmware for an Adafruit Feather nRF52832 board that reads tire surface temperatures using an MLX90641 IR sensor and broadcasts the data via Bluetooth Low Energy (BLE). The firmware averages each of the sensor's 16 columns and publishes them over the [RejsaRubberTrac](https://github.com/MagnusThome/RejsaRubberTrac) BLE protocol, which RaceChrono and Harry's LapTimer decode natively. The wire protocol is a swappable, compile-time-selected piece so other protocols (e.g. RaceChrono DIY) can be added alongside it.
+Firmware for an [Adafruit Feather nRF52832](https://www.adafruit.com/product/3406) that reads tire surface temperatures with a [Melexis MLX90641](https://www.melexis.com/en/product/MLX90641/) 16x12 thermal array and publishes them over Bluetooth Low Energy. It speaks the [RejsaRubberTrac](https://github.com/MagnusThome/RejsaRubberTrac) protocol, which RaceChrono and Harry's LapTimer decode natively, and is structured so another wire protocol (e.g. RaceChrono DIY) can be added without touching anything else.
 
-## Quick Start
+## Contents
 
-1. **Install [PlatformIO](https://platformio.org/).**
-2. **Connect your Adafruit Feather nRF52832 via USB.**
-3. **Build and upload the firmware:**
-   ```sh
-   pio run -e adafruit_feather_nrf52832 --target upload
-   ```
+- [Hardware](#hardware)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [What the firmware does](#what-the-firmware-does)
+- [Project layout](#project-layout)
+- [Architecture rules](#architecture-rules)
+- [Testing and documentation checks](#testing-and-documentation-checks)
+- [Visualization tooling](#visualization-tooling)
+- [Contributing](#contributing)
+- [Coding guidelines](#coding-guidelines)
 
-## Build stamping
+## Hardware
 
-Every firmware build logs the git revision it was built from on boot (`Firmware build v1.2-3-g1387909-dirty`). [`scripts/build_info.py`](scripts/build_info.py) runs before each build and regenerates `include/build_info.hh` from the working tree, so nothing has to be updated by hand; `-dirty` means uncommitted changes were flashed. The header is git-ignored.
+| Part | Connection |
+|---|---|
+| Adafruit Feather nRF52832 | USB for flashing and the serial log |
+| MLX90641 thermal array | I²C, address `0x33`, 400 kHz |
+| Single-cell LiPo | Feather JST connector; voltage sensed on `A7` through the on-board divider |
 
-## Runtime supervision
+One board per wheel. Each board is flashed with its corner set in `config.hh` so RaceChrono can place it.
 
-The nRF52 hardware watchdog is armed first thing in `setup()` and fed once per `loop()` iteration (and per frame-read attempt, since a read can take seconds to time out). Anything that stalls longer than `config::watchdog_timeout_s`, including a fatal init error, ends in a reset rather than a hung board. The boot log's `Firmware build` line tells you which revision came back up.
+## Quick start
+
+1. Install [PlatformIO](https://platformio.org/).
+2. Set the wheel corner (and anything else you need) in [`include/config.hh`](include/config.hh).
+3. Connect the Feather over USB and run:
+
+```sh
+pio run -e adafruit_feather_nrf52832 --target upload   # build and flash
+pio device monitor                                     # 115200 baud serial log
+```
+
+The first log line is `Firmware build <git describe>`, e.g. `v1.2-3-g1387909-dirty`. It is stamped in at build time by `scripts/build_info.py`, which regenerates the git-ignored `include/build_info.hh` before every build; `-dirty` means uncommitted changes were flashed.
 
 ## Configuration
 
-Every per-board / per-deployment tunable lives in [`include/config.hh`](include/config.hh): wheel corner, log level, MLX90641 I²C address / bus speed / resolution / refresh rate, battery refresh interval, BLE TX power and advertising intervals, and the active BLE protocol (`config::ActiveBleProtocol`). Modules carry no hidden defaults of their own.
+Every per-board / per-deployment tunable lives in [`include/config.hh`](include/config.hh). Modules carry no hidden defaults of their own.
+
+| Setting | Default | Notes |
+|---|---|---|
+| `wheel_corner` | `FL` | Advertised in the device name; set per board |
+| `log_level` | `INFO` | `DEBUG` prints per-frame chatter |
+| `stream_frames_over_serial` | `true` | Raw frames for `serial_viz.py`, see below |
+| `mlx90641_i2c_addr` | `0x33` | |
+| `mlx90641_config` | 400 kHz, 19-bit, 32 Hz, 50 000 polls | Bus speed, ADC resolution, frame rate, data-ready poll limit |
+| `frame_read_max_retries` | 5 | Per `loop()` iteration |
+| `battery_refresh_ms` | 60 000 | How often the LiPo is sampled |
+| `boot_delay_ms` | 5 000 | Grace period to attach a monitor before the radio starts |
+| `watchdog_timeout_s` | 8 | Must exceed the boot delay and one frame-read timeout |
+| `ble_advertising` | +4 dBm, 100 ms | TX power, advertising intervals and timeouts |
+| `ActiveBleProtocol` | `RejsaBleProtocol<BluefruitBlePeripheral>` | The wire protocol this build speaks |
+
+## What the firmware does
+
+**Boot.** `setup()` arms the hardware watchdog, initialises the MLX90641 (EEPROM dump, Hamming check, calibration extraction, resolution and refresh rate), samples the battery, waits `boot_delay_ms`, starts the radio, and registers the BLE protocol. Any fatal error is logged and the board deliberately lets the watchdog reset it.
+
+**Loop.** Each iteration reads one frame (retrying on transient failures), computes per-pixel temperatures, averages the 16 columns, refreshes the battery reading when due, and publishes the sample. Both MLX90641 sub-pages are accepted, so the BLE update rate equals the sensor's refresh rate.
+
+**BLE protocol (RejsaRubberTrac).** Service `0x1ff7` with three 20-byte NOTIFY characteristics, all temperatures in tenths of a degree, little-endian:
+
+| Characteristic | Contents |
+|---|---|
+| `0x01` | protocol byte, unused, distance (mm), even columns 0, 2, … 14 |
+| `0x02` | protocol byte, battery %, battery mV, odd columns 1, 3, … 15 |
+| `0x03` | protocol byte, unused, distance (mm), max of each column pair (the 8 zones RaceChrono logs) |
+
+The device name is `RejsaRubber` + corner + the last three MAC bytes in hex, e.g. `RejsaRubberFLABCDEF`. Full details in [`lib/ble_protocol/rejsa_ble_protocol.hh`](lib/ble_protocol/rejsa_ble_protocol.hh).
+
+**Serial frame stream.** When enabled, every frame is also written to the USB serial port as the 4-byte magic `AA 55 54 54` followed by 192 little-endian `float32` values in row-major order. Text logs share the port; the magic is how `scripts/vizualisation/serial_viz.py` finds frame boundaries.
+
+**Supervision.** The nRF52 watchdog is fed once per `loop()` and once per frame-read attempt. A wedged sensor, a stuck bus or a fatal init error all end in a reset rather than a hung board; the `Firmware build` log line tells you which revision came back up.
 
 ## Project layout
 
-The litmus test for where a file lives: **does it need `Arduino.h` / `Bluefruit.h` / `Wire.h` to compile?**
-
-- **No → `lib/<name>/`.** Portable C++, standard library only. Depends on other `lib/` code by template parameter, never on a concrete Arduino type. This is what the `native` environment builds and `test/` exercises on the host.
-- **Yes → `include/` (declarations) + `src/` (definitions).** Board-coupled glue, only exercised by flashing the board.
-
-`src/main.cpp` is the composition root and the one place allowed to know about both sides: it constructs the `include/`-side types and hands them to the `lib/`-side templates.
-
 ```
-lib/
-  logger/         LogLevel, the "Logger" shape, NullLogger
-  i2c_adapter/    the "Wire" shape, I2CAdapter<WireT> (register-level I²C)
-  mlx90641/       MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config + Status
-  ble_protocol/   the "BlePeripheral" shape, TireTelemetry/DeviceIdentity, RejsaBleProtocol<PeripheralT>
-  battery/        LiPo voltage -> percent curve
-include/          config.hh, ArduinoWire, ArduinoLogger, BluefruitBlePeripheral, battery ADC, watchdog, serial frame stream
-src/              main.cpp (composition root) + the include/ definitions
-test/             host unit tests: test_*/ per suite, mocks/ and fixtures/ shared by include
-scripts/vizualisation/   live dashboards over serial and BLE (see its README)
+include/config.hh          every tunable, and the active BLE protocol alias
+lib/                       portable C++, built and tested on the host
+  logger/                  LogLevel, the Logger shape, NullLogger
+  i2c_adapter/             the Wire shape, I2CAdapter<WireT>, I2cStatus
+  mlx90641/                MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config, Status
+  ble_protocol/            the BlePeripheral shape, TireTelemetry, RejsaBleProtocol<PeripheralT>
+  battery/                 LiPo voltage-to-percent curve
+include/ + src/            board glue: ArduinoWire, ArduinoLogger, BluefruitBlePeripheral,
+                           battery ADC, watchdog, serial frame stream, and main.cpp
+test/                      host unit tests, see test/README.md
+scripts/build_info.py      git revision stamp, run by PlatformIO before each build
+scripts/vizualisation/     live dashboards over serial and BLE, see its README
+docs/Doxyfile              API documentation build and coverage check
 ```
 
-Dispatch is compile-time everywhere: interfaces are documented "shapes" enforced by a `static_assert` on a small SFINAE trait (`is_wire<T>`, `is_logger<T>`, `is_ble_peripheral<T>`), so a mock only has to implement the same member functions, no inheritance. Collaborators are injected by reference only where a test needs to script or inspect them (the Wire and the BLE peripheral); the logger is owned internally.
+## Architecture rules
 
-## Running the tests
+**Where a file lives.** Does it need `Arduino.h`, `Bluefruit.h` or `Wire.h` to compile? No: it goes in `lib/<name>/` and depends on other code only through template parameters. Yes: declarations in `include/`, definitions in `src/`. [`src/main.cpp`](src/main.cpp) is the composition root and the one place allowed to know about both sides.
+
+**Declarations in headers, definitions elsewhere.** A `.hh` holds declarations and documentation only. Non-template definitions go in a `.cc`; template and inline definitions go in a sibling `.inl` that the header includes as its last line. Readers get the interface without the implementation; the compiler still sees everything it needs.
+
+**Compile-time dispatch, no vtables.** Interfaces are documented "shapes" (`Wire`, `Logger`, `I2CAdapter`, `BlePeripheral`) enforced by a small `std::void_t` trait plus a `static_assert` at the point of use, so a mismatch is reported at the instantiation site. A mock only has to implement the same member functions. Nothing is chosen at run time; the protocol is selected by a type alias in `config.hh`.
+
+**Inject only where a test needs control.** The bus and the BLE peripheral are injected by reference because tests script and inspect them. The logger is owned and default-constructed because nothing asserts on log output.
+
+**Status codes are enums.** Functions that report an outcome return `I2cStatus`, `mlx90641::Status` or `bool`, never a bare `int`. Zero is always success.
+
+## Testing and documentation checks
 
 ```sh
-pio test -e native                                                     # C++ unit tests on the host
-python -m unittest discover -s scripts/vizualisation -p "test_*.py"    # visualization tooling
+pio test -e native                                                    # C++ unit tests on the host
+python -m unittest discover -s scripts/vizualisation -p "test_*.py"   # visualization tooling
+doxygen docs/Doxyfile                                                 # API docs -> docs/api/html; fails on any undocumented item
 ```
+
+CI (`.github/workflows/build.yaml`) runs the firmware build and all three checks on every push and pull request. The Doxygen run treats warnings as errors, so every function, parameter, template parameter and return value must be documented.
+
+## Visualization tooling
+
+[`scripts/vizualisation/`](scripts/vizualisation/README.md) contains `serial_viz.py` (full 12x16 heatmap from the serial frame stream) and `ble.py` (what a RaceChrono-style consumer sees, auto-detecting the protocol from the advertisement). The BLE decoders mirror the firmware's protocol split and have their own unit tests.
 
 ## Contributing
 
-To contribute to this repository:
-
-1. Open a pull request (PR) targeting the `main` branch.
+1. Open a pull request targeting `main`.
 2. Request a review from a project maintainer.
-3. Ensure your changes have unit test coverage.
-4. Verify that your changes do not break the build.
-5. Make sure all unit tests are passing.
+3. Cover your change with unit tests and document new functions.
+4. Make sure the build, the tests and the Doxygen check pass.
 
 ## Coding guidelines
 
@@ -73,8 +136,6 @@ To contribute to this repository:
 - Output parameter definition: a parameter passed by reference (or pointer) that the function writes into to communicate its outcome or data.
 
 Rationale: Prefer enum status codes over plain ints because named values are clearer and type-safe. Avoid booleans since they only convey success/failure and cannot propagate the reason for an error. Enums keep 0 = Success and still communicate the cause.
-
-Examples:
 
 ```cpp
 // Enum return (uses output parameter), 0 means success
@@ -90,14 +151,6 @@ ReadStatus read_eeprom(uint8_t* buffer, size_t size) {
   // ...perform read...
   return ReadStatus::Success;
 }
-
-void example_call_enum() {
-  uint8_t buf[64];
-  ReadStatus rc = read_eeprom(buf, sizeof(buf));
-  if (rc != ReadStatus::Success) {
-    // handle error
-  }
-}
 ```
 
 ```cpp
@@ -107,22 +160,13 @@ int read_temperature_celsius() {
   if (/* sensor error */) throw std::runtime_error("sensor read failed");
   return /* computed temperature */;
 }
-
-void example_call_exception() {
-  try {
-    int t = read_temperature_celsius();
-    // use t
-  } catch (const std::exception& e) {
-    // handle error
-  }
-}
 ```
 
-Note: An output parameter example signature:
-```cpp
-void read_eeprom(int& value);               // single value by reference
-void read_eeprom(uint8_t* buffer, size_t);  // buffer via pointer + size
-```
+### Headers and documentation
+
+- Headers (`.hh`) contain declarations and Doxygen comments only. Template and inline definitions go in a sibling `.inl` included at the end of the header; other definitions go in a `.cc`.
+- Every function declaration has a `@brief`, one `@param` per parameter, one `@tparam` per template parameter, and a `@return` unless it returns `void`. Data members and enumerators get a trailing `///<`.
+- `doxygen docs/Doxyfile` must pass with no warnings.
 
 ### Naming conventions
 
@@ -133,11 +177,9 @@ void read_eeprom(uint8_t* buffer, size_t);  // buffer via pointer + size
 
 Rationale: Consistent naming improves readability and searchability; a 120-column limit fits common editors and code review tools; mandatory braces remove ambiguity and prevent bugs introduced by later edits.
 
-Examples:
 ```cpp
 // Disallowed: missing braces and single-line body
 if (ready) do_work();
-for (int i = 0; i < 5; i++) do_work();
 
 // Allowed: braces always used; snake_case for variables/functions; CamelCase for classes
 class TemperatureReader { /* ... */ };
@@ -150,4 +192,3 @@ void do_work() {
   }
 }
 ```
-

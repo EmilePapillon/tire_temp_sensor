@@ -1,11 +1,49 @@
+// Inline and template definitions for mlx90641_driver.hh. Included by the header; do not include directly.
 #pragma once
-// Template member definitions for MLX90641Sensor. Included by
-// mlx90641_driver.hh; do not include directly.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 
 namespace mlx90641 {
+
+inline const char* status_name(Status status) {
+    switch (status) {
+        case Status::Success:                     return "success";
+        case Status::I2cNack:                     return "i2c nack";
+        case Status::I2cBusError:                 return "i2c bus error";
+        case Status::I2cNoData:                   return "i2c no data";
+        case Status::I2cVerifyMismatch:           return "i2c verify mismatch";
+        case Status::NotAnMlx90641:               return "not an MLX90641";
+        case Status::EepromCorrupt:               return "eeprom corrupt";
+        case Status::CalibrationExtractionFailed: return "calibration extraction failed";
+        case Status::DataReadyTimeout:            return "data ready timeout";
+        case Status::FrameSyncFailed:             return "frame sync failed";
+    }
+    return "?";
+}
+
+inline Status from_i2c(I2cStatus status) {
+    switch (status) {
+        case I2cStatus::Success:        return Status::Success;
+        case I2cStatus::Nack:           return Status::I2cNack;
+        case I2cStatus::BusError:       return Status::I2cBusError;
+        case I2cStatus::NoData:         return Status::I2cNoData;
+        case I2cStatus::VerifyMismatch: return Status::I2cVerifyMismatch;
+    }
+    return Status::I2cBusError;
+}
+
+inline std::array<float, sensor_columns> column_averages(const std::array<float, num_pixels>& temps) {
+    std::array<float, sensor_columns> averages{};
+    for (std::size_t col = 0; col < sensor_columns; col++) {
+        float sum = 0.0f;
+        for (std::size_t row = 0; row < sensor_rows; row++) {
+            sum += temps[row * sensor_columns + col];
+        }
+        averages[col] = sum / static_cast<float>(sensor_rows);
+    }
+    return averages;
+}
 
 template <typename I2CAdapterT, typename LoggerT>
 MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, uint8_t i2c_addr)

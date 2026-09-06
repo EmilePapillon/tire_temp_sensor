@@ -1,0 +1,35 @@
+# Doxygen configuration for tire_temp_sensor.
+#
+#   doxygen docs/Doxyfile        # writes docs/api/html (git-ignored)
+#
+# Warnings are errors: every function, template parameter, parameter and
+# return value must be documented. CI runs this on every push.
+
+PROJECT_NAME           = "tire_temp_sensor"
+PROJECT_BRIEF          = "MLX90641 tire temperature sensor firmware for the Adafruit Feather nRF52832"
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = README.md test/README.md scripts/vizualisation/README.md \
+                         lib include src test/mocks test/fixtures
+USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_ID_STYLE      = GITHUB
+FILE_PATTERNS          = *.hh *.inl *.cc *.cpp *.md
+RECURSIVE              = YES
+EXTENSION_MAPPING      = inl=C++
+EXCLUDE_PATTERNS       = */build_info.hh
+
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = YES
+
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+QUIET                  = YES
+
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = "__attribute__(x)=" "__has_include(x)=0"
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+SOURCE_BROWSER         = YES

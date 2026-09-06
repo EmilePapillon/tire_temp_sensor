@@ -1,44 +1,15 @@
 #pragma once
 #include <cstdint>
 
-// Pure battery math, no board dependency. The ADC-facing half lives in
-// include/battery.hh.
+/// @file battery_lipo.hh
+/// @brief Pure battery math, no board dependency. The ADC-facing half lives in include/battery.hh.
 
-/// @brief Map a single-cell LiPo terminal voltage (mV) to an approximate state
-/// of charge (0-100 %).
+/// @brief Map a single-cell LiPo terminal voltage to an approximate state of charge.
 ///
 /// Piecewise-linear fit of a typical LiPo discharge curve; matches the curve
 /// used by upstream RejsaRubberTrac so RaceChrono shows familiar numbers.
-inline uint8_t battery_lipo_percent(uint16_t mvolts) {
-    if (mvolts >= 4200) {
-        return 100;
-    }
-    if (mvolts > 4100) {
-        return static_cast<uint8_t>(90 + (mvolts - 4100) * 10 / 100);
-    }
-    if (mvolts > 4000) {
-        return static_cast<uint8_t>(80 + (mvolts - 4000) * 10 / 100);
-    }
-    if (mvolts > 3900) {
-        return static_cast<uint8_t>(70 + (mvolts - 3900) * 10 / 100);
-    }
-    if (mvolts > 3800) {
-        return static_cast<uint8_t>(50 + (mvolts - 3800) * 20 / 100);
-    }
-    if (mvolts > 3700) {
-        return static_cast<uint8_t>(30 + (mvolts - 3700) * 20 / 100);
-    }
-    if (mvolts > 3600) {
-        return static_cast<uint8_t>(20 + (mvolts - 3600) * 10 / 100);
-    }
-    if (mvolts > 3500) {
-        return static_cast<uint8_t>(10 + (mvolts - 3500) * 10 / 100);
-    }
-    if (mvolts > 3400) {
-        return static_cast<uint8_t>(2 + (mvolts - 3400) * 8 / 100);
-    }
-    if (mvolts > 3300) {
-        return static_cast<uint8_t>(1 + (mvolts - 3300) * 1 / 100);
-    }
-    return 1;
-}
+/// @param mvolts Terminal voltage in millivolts.
+/// @return Charge in percent, 1..100. Never 0: a reading exists, so the cell is not empty.
+uint8_t battery_lipo_percent(uint16_t mvolts);
+
+#include "battery_lipo.inl"

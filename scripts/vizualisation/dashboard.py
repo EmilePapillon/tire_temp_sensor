@@ -15,6 +15,7 @@ RENDER_HZ = 15
 
 
 def _batt_color(pct):
+    """Gauge colour for a battery percentage: grey when unknown, green/amber/red by charge."""
     if pct is None:
         return "0.6"
     if pct >= 50:
@@ -29,6 +30,13 @@ class Dashboard:
     responsive (and closable) even when BLE notifications stop."""
 
     def __init__(self, state: TireState, protocol: TireBleProtocol, window_closed: asyncio.Event):
+        """Build the figure.
+
+        Args:
+            state: Shared state the BLE callbacks write into; read on every refresh().
+            protocol: Supplies the window title and strip labels.
+            window_closed: Set when the user closes the window or drawing fails.
+        """
         self.state = state
         self.window_closed = window_closed
 
@@ -73,9 +81,11 @@ class Dashboard:
         self.fig.canvas.mpl_connect("close_event", lambda _e: window_closed.set())
 
     def alive(self):
+        """Whether the figure window is still open."""
         return plt.fignum_exists(self.fig.number)
 
     def refresh(self):
+        """Repaint every element from the current state."""
         state = self.state
         now = time.monotonic()
         fresh = state.last_packet > 0.0 and (now - state.last_packet < STALE_AFTER)
@@ -111,6 +121,7 @@ class Dashboard:
 
 
 async def render_loop(dash: Dashboard):
+    """Repaint `dash` at RENDER_HZ until its window closes."""
     period = 1.0 / RENDER_HZ
     while not dash.window_closed.is_set():
         if not dash.alive():

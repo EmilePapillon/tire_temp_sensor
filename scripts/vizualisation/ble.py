@@ -23,6 +23,15 @@ SCAN_TIMEOUT = 10.0
 # BLE lifecycle
 
 async def discover(expected: str | None, timeout: float):
+    """Scan for the first device speaking a known protocol.
+
+    Args:
+        expected: Protocol name to insist on, or None to accept any registered protocol.
+        timeout: Seconds to scan.
+
+    Returns:
+        A (device, protocol) pair, or (None, None) if nothing matched.
+    """
     print("Scanning for BLE device...")
     found = await BleakScanner.discover(timeout=timeout, return_adv=True)
     for dev, adv in found.values():
@@ -40,10 +49,12 @@ async def stream(device, protocol: TireBleProtocol, state: TireState, window_clo
     """Connect, subscribe, and hold the link until the device drops or the window closes."""
 
     def on_disconnect(_client):
+        """bleak disconnect callback: flip the banner, keep the window alive."""
         state.connected = False
         print("Device disconnected — close the window to exit.")
 
     def make_handler(uuid: str):
+        """Bind a notification callback to the characteristic it subscribes to."""
         def handle(_sender, data: bytearray):
             try:
                 protocol.decode(uuid, bytes(data), state)
@@ -73,6 +84,7 @@ async def stream(device, protocol: TireBleProtocol, state: TireState, window_clo
 
 
 async def main(args):
+    """Discover, then stream into a dashboard until the window closes."""
     device, protocol = await discover(args.protocol, args.scan_timeout)
     if device is None:
         return
@@ -98,6 +110,7 @@ async def main(args):
 
 
 def parse_args():
+    """Command-line options: --protocol override and --scan-timeout."""
     parser = argparse.ArgumentParser(description="Live dashboard for a BLE tire temperature sensor.")
     parser.add_argument("--protocol", choices=protocol_names(), default=None,
                         help="insist on this wire protocol instead of auto-detecting from the advertisement")

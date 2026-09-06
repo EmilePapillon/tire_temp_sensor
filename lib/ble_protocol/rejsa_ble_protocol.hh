@@ -1,175 +1,129 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include "i_ble_peripheral.hh"
 #include "tire_telemetry.hh"
 
-// RejsaRubberTrac BLE protocol (natively supported by RaceChrono and Harry's
-// LapTimer).
-//
-// Service 0x1ff7 exposes three NOTIFY characteristics, each carrying a fixed
-// 20-byte packet:
-//   0x01 -> DataPackOne : even-numbered temp spots + suspension distance
-//   0x02 -> DataPackTwo : odd-numbered temp spots + battery state
-//   0x03 -> DataPackThr : per-pair max of all 16 spots + suspension distance
-// All temps are degrees Celsius x 10. Fields are little-endian (native nRF52).
-//
-// RaceChrono keys off the device name to detect the sensor and assign it to a
-// wheel: "RejsaRubber" + corner (FL/FR/RL/RR) + the last three MAC bytes as hex.
-//
-// "BleTireProtocol" shape (what main.cpp drives, shared with future protocols):
-//     bool begin(const DeviceIdentity& identity);  // name + GATT + advertising; false if registration failed
-//     bool is_ready();                             // a consumer can receive data
-//     bool publish(const TireTelemetry& telemetry);
-//     void poll();                                 // per-loop housekeeping
-//
-// The peripheral must already be started (PeripheralT::begin()) before
-// begin(): that is where the MAC address in DeviceIdentity comes from.
+/// @file rejsa_ble_protocol.hh
+/// @brief RejsaRubberTrac BLE protocol (natively supported by RaceChrono and Harry's LapTimer).
+///
+/// Service 0x1ff7 exposes three NOTIFY characteristics, each carrying a fixed
+/// 20-byte packet:
+///   - 0x01 DataPackOne : even-numbered temp spots + suspension distance
+///   - 0x02 DataPackTwo : odd-numbered temp spots + battery state
+///   - 0x03 DataPackThr : per-pair max of all 16 spots + suspension distance
+///
+/// All temps are degrees Celsius x 10. Fields are little-endian (native nRF52).
+///
+/// RaceChrono keys off the device name to detect the sensor and assign it to a
+/// wheel: "RejsaRubber" + corner (FL/FR/RL/RR) + the last three MAC bytes as hex.
+///
+/// "BleTireProtocol" shape (what main.cpp drives, shared with future protocols):
+/// @code
+///     bool begin(const DeviceIdentity& identity);  // name + GATT + advertising
+///     bool is_ready();                             // a consumer can receive data
+///     bool publish(const TireTelemetry& telemetry);
+///     void poll();                                 // per-loop housekeeping
+/// @endcode
 
+/// @brief RejsaRubberTrac framing over any BlePeripheral-shaped radio.
+///
+/// The peripheral must already be started (`PeripheralT::begin()`) before
+/// begin(): that is where the MAC address in DeviceIdentity comes from.
+/// @tparam PeripheralT A type satisfying ble::is_ble_peripheral; injected by reference so tests can inspect it.
 template <typename PeripheralT>
 class RejsaBleProtocol {
     static_assert(ble::is_ble_peripheral<PeripheralT>::value,
                   "PeripheralT must implement the BlePeripheral shape (see i_ble_peripheral.hh)");
 
 public:
-    static constexpr ble::Uuid16 service_uuid = 0x1ff7;
-    static constexpr ble::Uuid16 char_one_uuid = 0x01;
-    static constexpr ble::Uuid16 char_two_uuid = 0x02;
-    static constexpr ble::Uuid16 char_thr_uuid = 0x03;
-    static constexpr uint8_t protocol_version = 0x02;
-    static constexpr std::size_t packet_size = 20;
-    static constexpr std::size_t device_name_len = 19;  // "RejsaRubber" + "FL" + 6 hex digits
-    static constexpr std::size_t temps_per_packet = TireTelemetry::num_columns / 2;
+    static constexpr ble::Uuid16 service_uuid = 0x1ff7;   ///< GATT service RaceChrono scans for.
+    static constexpr ble::Uuid16 char_one_uuid = 0x01;    ///< DataPackOne characteristic.
+    static constexpr ble::Uuid16 char_two_uuid = 0x02;    ///< DataPackTwo characteristic.
+    static constexpr ble::Uuid16 char_thr_uuid = 0x03;    ///< DataPackThr characteristic.
+    static constexpr uint8_t protocol_version = 0x02;     ///< Value of every packet's first byte.
+    static constexpr std::size_t packet_size = 20;        ///< Wire size of each packet in bytes.
+    static constexpr std::size_t device_name_len = 19;    ///< "RejsaRubber" + "FL" + 6 hex digits.
+    static constexpr std::size_t temps_per_packet = TireTelemetry::num_columns / 2;  ///< Temp slots per packet.
 
-    RejsaBleProtocol(PeripheralT& peripheral, const ble::AdvertisingParams& advertising)
-        : peripheral_(peripheral), advertising_(advertising) {
-        device_name_[0] = '\0';
-    }
+    /// @brief Bind to a radio and remember how to advertise on it.
+    /// @param peripheral The radio; must outlive this object.
+    /// @param advertising Radio-level advertising settings, applied in begin().
+    RejsaBleProtocol(PeripheralT& peripheral, const ble::AdvertisingParams& advertising);
 
-    bool begin(const DeviceIdentity& identity) {
-        build_device_name(identity, device_name_);
-        peripheral_.set_device_name(device_name_);
+    /// @brief Set the device name, register the GATT layout and start advertising.
+    /// @param identity MAC address and wheel corner used to build the device name.
+    /// @return False if any service or characteristic registration, or advertising start, failed.
+    bool begin(const DeviceIdentity& identity);
 
-        ble::CharacteristicProps props;
-        props.read = true;
-        props.notify = true;
-        props.fixed_len = packet_size;
+    /// @brief Whether a consumer is connected and notifications can be delivered.
+    /// @return True while a central is connected.
+    bool is_ready();
 
-        if (!peripheral_.add_service(service_uuid)) {
-            return false;
-        }
-        for (ble::Uuid16 uuid : {char_one_uuid, char_two_uuid, char_thr_uuid}) {
-            if (!peripheral_.add_characteristic(uuid, props)) {
-                return false;
-            }
-        }
-        return peripheral_.start_advertising(advertising_);
-    }
+    /// @brief Push one telemetry sample as three notifications.
+    /// @param telemetry Column temperatures, battery state and distance to encode.
+    /// @return False if no consumer is connected or any notification was rejected by the stack.
+    bool publish(const TireTelemetry& telemetry);
 
-    bool is_ready() {
-        return peripheral_.is_connected();
-    }
+    /// @brief Per-loop housekeeping; forwards to the peripheral. Notifications are fire-and-forget.
+    void poll();
 
-    /// @brief Push one telemetry sample. Returns false if no consumer is connected.
-    bool publish(const TireTelemetry& telemetry) {
-        if (!is_ready()) {
-            return false;
-        }
+    /// @brief The advertised device name, valid after begin().
+    /// @return NUL-terminated string owned by this object.
+    const char* device_name() const;
 
-        DataPackOne one{};
-        DataPackTwo two{};
-        DataPackThr thr{};
-        one.protocol = protocol_version;
-        two.protocol = protocol_version;
-        thr.protocol = protocol_version;
-        one.distance = telemetry.distance_mm;
-        thr.distance = telemetry.distance_mm;
-        two.charge = telemetry.battery_pct;
-        two.voltage = telemetry.battery_mv;
-
-        for (std::size_t i = 0; i < temps_per_packet; i++) {
-            const int16_t even_col = to_tenths(telemetry.column_temps_c[i * 2]);
-            const int16_t odd_col = to_tenths(telemetry.column_temps_c[i * 2 + 1]);
-            one.temps[i] = even_col;
-            two.temps[i] = odd_col;
-            thr.temps[i] = (even_col > odd_col) ? even_col : odd_col;
-        }
-
-        bool ok = true;
-        ok &= peripheral_.notify(char_one_uuid, reinterpret_cast<const uint8_t*>(&one), sizeof(one));
-        ok &= peripheral_.notify(char_two_uuid, reinterpret_cast<const uint8_t*>(&two), sizeof(two));
-        ok &= peripheral_.notify(char_thr_uuid, reinterpret_cast<const uint8_t*>(&thr), sizeof(thr));
-        return ok;
-    }
-
-    /// @brief Nothing to do: notifications are fire-and-forget.
-    void poll() {
-        peripheral_.poll();
-    }
-
-    const char* device_name() const {
-        return device_name_;
-    }
-
-    /// @brief "RejsaRubber" + corner + last three MAC bytes (most significant first).
-    static void build_device_name(const DeviceIdentity& identity, char (&out)[device_name_len + 1]) {
-        const char* prefix = corner_prefix(identity.corner);
-        std::memcpy(out, prefix, 13);
-        // mac_address[2..0] rendered as 6 hex digits: [2] first, [0] last.
-        for (std::size_t i = 0; i < 3; i++) {
-            const uint8_t byte = identity.mac_address[2 - i];
-            out[13 + i * 2] = hex_digit(byte >> 4);
-            out[14 + i * 2] = hex_digit(byte & 0x0f);
-        }
-        out[device_name_len] = '\0';
-    }
+    /// @brief Build "RejsaRubber" + corner + last three MAC bytes (most significant first).
+    /// @param identity MAC address and corner to encode.
+    /// @param out Receives the NUL-terminated name.
+    static void build_device_name(const DeviceIdentity& identity, char (&out)[device_name_len + 1]);
 
 private:
+    /// @brief Characteristic 0x01: even columns and suspension distance.
     struct DataPackOne {
-        uint8_t protocol;
-        uint8_t unused;
-        int16_t distance;
-        int16_t temps[temps_per_packet];
+        uint8_t protocol;                 ///< protocol_version
+        uint8_t unused;                   ///< Always 0.
+        int16_t distance;                 ///< Suspension travel, mm.
+        int16_t temps[temps_per_packet];  ///< Columns 0, 2, ... 14 in tenths of a degree C.
     } __attribute__((packed));
 
+    /// @brief Characteristic 0x02: odd columns and battery state.
     struct DataPackTwo {
-        uint8_t protocol;
-        uint8_t charge;
-        uint16_t voltage;
-        int16_t temps[temps_per_packet];
+        uint8_t protocol;                 ///< protocol_version
+        uint8_t charge;                   ///< Battery percent, 0..100.
+        uint16_t voltage;                 ///< Battery millivolts.
+        int16_t temps[temps_per_packet];  ///< Columns 1, 3, ... 15 in tenths of a degree C.
     } __attribute__((packed));
 
+    /// @brief Characteristic 0x03: per-pair maximum, the 8-zone strip RaceChrono logs.
     struct DataPackThr {
-        uint8_t protocol;
-        uint8_t unused;
-        int16_t distance;
-        int16_t temps[temps_per_packet];
+        uint8_t protocol;                 ///< protocol_version
+        uint8_t unused;                   ///< Always 0.
+        int16_t distance;                 ///< Suspension travel, mm.
+        int16_t temps[temps_per_packet];  ///< max(column 2i, column 2i+1) in tenths of a degree C.
     } __attribute__((packed));
 
     static_assert(sizeof(DataPackOne) == packet_size, "DataPackOne must be 20 bytes on the wire");
     static_assert(sizeof(DataPackTwo) == packet_size, "DataPackTwo must be 20 bytes on the wire");
     static_assert(sizeof(DataPackThr) == packet_size, "DataPackThr must be 20 bytes on the wire");
 
-    static int16_t to_tenths(float celsius) {
-        return static_cast<int16_t>(celsius * 10.0f);
-    }
+    /// @brief Convert a temperature to the wire unit.
+    /// @param celsius Temperature in degrees Celsius.
+    /// @return Tenths of a degree, truncated toward zero.
+    static int16_t to_tenths(float celsius);
 
-    static const char* corner_prefix(WheelCorner corner) {
-        switch (corner) {
-            case WheelCorner::FR: return "RejsaRubberFR";
-            case WheelCorner::RL: return "RejsaRubberRL";
-            case WheelCorner::RR: return "RejsaRubberRR";
-            case WheelCorner::FL: break;
-        }
-        return "RejsaRubberFL";
-    }
+    /// @brief Device-name prefix for a wheel corner.
+    /// @param corner The corner.
+    /// @return Static 13-character string such as "RejsaRubberFL".
+    static const char* corner_prefix(WheelCorner corner);
 
-    static char hex_digit(uint8_t nibble) {
-        return static_cast<char>((nibble < 0xA) ? ('0' + nibble) : ('A' + nibble - 10));
-    }
+    /// @brief Upper-case hexadecimal digit for a nibble.
+    /// @param nibble Value 0..15.
+    /// @return '0'..'9' or 'A'..'F'.
+    static char hex_digit(uint8_t nibble);
 
-    PeripheralT& peripheral_;
-    ble::AdvertisingParams advertising_;
-    char device_name_[device_name_len + 1];
+    PeripheralT& peripheral_;                 ///< The injected radio.
+    ble::AdvertisingParams advertising_;      ///< Applied in begin().
+    char device_name_[device_name_len + 1];  ///< Built in begin(); empty before.
 };
+
+#include "rejsa_ble_protocol.inl"

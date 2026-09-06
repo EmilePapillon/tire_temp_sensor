@@ -1,35 +1,37 @@
 #pragma once
-
-#include <cstdint>
 #include <array>
+#include <cstdint>
+
+/// @file mlx90641_params.hh
+/// @brief Calibration parameter set decoded from the MLX90641 EEPROM.
 
 namespace mlx90641 {
 
-/// @brief Struct containing all calibration parameters for the MLX90641 sensor
-struct ParamsMLX90641{
-        std::int16_t kVdd;
-        std::int16_t vdd25;
-        float KvPTAT;
-        float KtPTAT;
-        std::uint16_t vPTAT25;
-        float alphaPTAT;
-        std::int16_t gainEE;
-        float tgc;
-        float cpKv;
-        float cpKta;
-        std::uint8_t resolutionEE;
-        std::uint8_t calibrationModeEE;
-        float KsTa;
-        std::array<float, 8> ksTo;
-        std::array<std::int16_t, 8> ct;
-        std::array<float, 192> alpha;    
-        std::array<std::array<std::int16_t, 192>, 2> offset;    
-        std::array<float, 192> kta;    
-        std::array<float, 192> kv;
-        float cpAlpha;
-        std::int16_t cpOffset;
-        float emissivityEE; 
-        std::array<std::uint16_t, 2> brokenPixels;
-    }; 
+/// @brief All calibration parameters the temperature math needs, in the Melexis reference naming.
+struct ParamsMLX90641 {
+    std::int16_t kVdd;                                     ///< Supply-voltage coefficient, LSB/V.
+    std::int16_t vdd25;                                    ///< VDD pixel reading at 25 C, LSB.
+    float KvPTAT;                                          ///< PTAT supply-voltage coefficient.
+    float KtPTAT;                                          ///< PTAT temperature coefficient.
+    std::uint16_t vPTAT25;                                 ///< PTAT reading at 25 C, LSB.
+    float alphaPTAT;                                       ///< PTAT proportionality factor.
+    std::int16_t gainEE;                                   ///< Gain calibration, LSB.
+    float tgc;                                             ///< Temperature gradient coefficient.
+    float cpKv;                                            ///< Compensation-pixel supply-voltage coefficient.
+    float cpKta;                                           ///< Compensation-pixel ambient coefficient.
+    std::uint8_t resolutionEE;                             ///< ADC resolution the calibration was done at, 0..3.
+    std::uint8_t calibrationModeEE;                        ///< Calibration mode flag (unused by the math).
+    float KsTa;                                            ///< Ambient sensitivity coefficient.
+    std::array<float, 8> ksTo;                             ///< Per-range object-temperature sensitivity slope.
+    std::array<std::int16_t, 8> ct;                        ///< Corner temperatures of the ranges, C.
+    std::array<float, 192> alpha;                          ///< Per-pixel sensitivity.
+    std::array<std::array<std::int16_t, 192>, 2> offset;   ///< Per-pixel offset for sub-page 0 and 1.
+    std::array<float, 192> kta;                            ///< Per-pixel ambient coefficient.
+    std::array<float, 192> kv;                             ///< Per-pixel supply-voltage coefficient.
+    float cpAlpha;                                         ///< Compensation-pixel sensitivity.
+    std::int16_t cpOffset;                                 ///< Compensation-pixel offset, LSB.
+    float emissivityEE;                                    ///< Default emissivity, 0..1.
+    std::array<std::uint16_t, 2> brokenPixels;             ///< Indices of broken pixels; 65535 = none.
+};
 
-} // namespace mlx90641
+}  // namespace mlx90641

@@ -1,4 +1,6 @@
 // Data tables for mlx90641_eeprom_fixture.hh. Do not include directly.
+
+/// @brief Decoded EEPROM image of a real sensor.
 const std::array<uint16_t, 832> test_eeprom_data = {
 0x00B7, 0x799F, 0x0000, 0x2031, 0x0004, 0x0320, 0x03E0, 0x101C, 
     0x15E3, 0x018A, 0x0ACD, 0x0000, 0x0901, 0x0000, 0x0000, 0xBE33, 
@@ -106,6 +108,7 @@ const std::array<uint16_t, 832> test_eeprom_data = {
     0x07B6, 0x07CA, 0x07DF, 0x07D8, 0x07F6, 0x07FB, 0x000A, 0x0009
 };
 
+/// @brief Parameters the parser is expected to extract from test_eeprom_data.
 const ParamsMLX90641 expected_params = {
     .kVdd               = -3136,
     .vdd25              = -12512,
