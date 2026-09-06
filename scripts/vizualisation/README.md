@@ -1,17 +1,33 @@
-# BLE Thermal Strip Visualization
+# Thermal Sensor Visualization
 
-## Setup and Usage
+Two standalone scripts for visualizing MLX90641 thermal data in real time, one reading over serial (USB) and one reading over BLE.
+
+## Setup
 
 1. Activate the virtual environment:
    ```bash
    source venv/bin/activate
    ```
 
-2. Run the script:
+2. Install dependencies (if not already installed):
    ```bash
-   python main.py
+   pip install -r requirements.txt
    ```
 
-## Description
+## serial_viz.py
 
-This script connects to an MLX90641 thermal sensor over BLE, receiving temperature data from 12 pixels and displaying them as a real-time horizontal thermal strip visualization. The visualization uses a color gradient to represent temperatures, updating continuously as new data arrives from the sensor.
+Reads raw 12x16 float32 frames from a serial connection and displays two live heatmaps side by side: the full 12x16 thermal image and a column-averaged strip.
+
+Pass your device's serial port with `-p`/`--port` (e.g. `/dev/cu.usbserial-XXXXXXXX` on macOS, `COM3` on Windows). If omitted, it falls back to a default port defined in the script.
+
+```bash
+python serial_viz.py -p /dev/cu.usbserial-XXXXXXXX
+```
+
+## ble.py
+
+Connects over BLE to a device advertising as `MLX90641`, subscribes to notifications carrying 8-column temperature chunks (2 packets per full frame), and displays a live 16-column thermal strip.
+
+```bash
+python ble.py
+```
