@@ -90,7 +90,13 @@ I2cStatus I2CAdapter<WireT>::write(uint8_t device_address, uint16_t reg, uint16_
     wire_.begin_transmission(device_address);
     wire_.delay_microseconds(5);
     wire_.write(cmd, sizeof(cmd));
-    wire_.end_transmission(true);
+    const int status = wire_.end_transmission(true);
+    if (status == 2 || status == 3) {
+        return I2cStatus::Nack;
+    }
+    if (status != 0) {
+        return I2cStatus::BusError;
+    }
 
     uint16_t read_back = 0;
     const I2cStatus read_status = read(device_address, reg, 1, &read_back);

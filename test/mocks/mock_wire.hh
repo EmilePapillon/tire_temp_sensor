@@ -22,6 +22,7 @@ public:
     // --- scripting -----------------------------------------------------------
     std::map<uint16_t, uint16_t> registers;  ///< Register file served to reads; missing = 0.
     int end_transmission_status = 0;         ///< Returned after a register-select (2-byte) transmission.
+    int write_end_transmission_status = 0;   ///< Returned after a register write (4-byte) transmission.
     bool fail_request = false;               ///< Make request_from() return 0 bytes.
     std::size_t short_response_bytes = 0;     ///< Return fewer bytes than requested when nonzero.
     uint16_t write_mask = 0xFFFF;            ///< Bits the "device" actually stores on write.

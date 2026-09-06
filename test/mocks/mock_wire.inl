@@ -23,7 +23,7 @@ inline int MockWire::end_transmission(bool /*stop*/) {
     }
     if (tx_.size() == 4) {
         registers[selected_register_] = static_cast<uint16_t>(((tx_[2] << 8) | tx_[3]) & write_mask);
-        return 0;
+        return write_end_transmission_status;
     }
     return tx_.size() == 2 ? end_transmission_status : 0;
 }
