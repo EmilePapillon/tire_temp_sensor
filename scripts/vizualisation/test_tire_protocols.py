@@ -56,6 +56,13 @@ class RejsaDecodeTest(unittest.TestCase):
         self.assertEqual(self.state.columns[1::2], [0.0] * 8)
         self.assertGreater(self.state.last_packet, 0.0)
 
+    def test_every_packet_bumps_the_revision(self):
+        packet = struct.pack("<BBh8h", 2, 0, 0, *([250] * 8))
+        self.assertEqual(self.state.revision, 0)
+        self.proto.decode(self.proto.CHAR_ONE, packet, self.state)
+        self.proto.decode(self.proto.CHAR_THR, packet, self.state)
+        self.assertEqual(self.state.revision, 2)
+
     def test_pack_two_fills_odd_columns_and_battery(self):
         temps = [210 + 20 * i for i in range(8)]
         self.proto.decode(self.proto.CHAR_TWO, struct.pack("<BBH8h", 2, 55, 3850, *temps), self.state)

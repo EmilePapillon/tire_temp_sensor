@@ -31,9 +31,11 @@ class TireState:
     battery_mv: int | None = None
     connected: bool = False
     last_packet: float = 0.0  # time.monotonic() of the last decoded packet
+    revision: int = 0         # bumped on every decoded packet; renderers repaint only when it changes
 
     def touch(self) -> None:
         self.last_packet = time.monotonic()
+        self.revision += 1
 
 
 class TireBleProtocol(Protocol):
