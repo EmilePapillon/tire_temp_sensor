@@ -1,93 +1,126 @@
+"""Live BLE dashboard for a tire temperature sensor.
+
+Scans for any device speaking a known tire protocol (see tire_protocols.py),
+connects with the matching decoder, and renders the shared dashboard. Pass
+``--protocol`` to insist on one protocol; by default the device's own
+advertisement decides.
+"""
+from __future__ import annotations
+
+import argparse
 import asyncio
-from bleak import BleakScanner, BleakClient
-import struct
+
 import matplotlib.pyplot as plt
-import numpy as np
-import sys
+from bleak import BleakClient, BleakScanner
 
-# BLE device and characteristic
-DEVICE_NAME = "MLX90641"
-CHAR_UUID = "00000001-0000-1000-8000-00805f9b34fb"
+from dashboard import Dashboard, render_loop
+from tire_protocols import TireBleProtocol, TireState, identify_protocol, protocol_names
 
-FULL_COLUMNS = 16
-full_buffer = [0.0] * FULL_COLUMNS  # 16-column averaged temperatures
-VMIN, VMAX = 20, 40  # fixed color scale, degrees Celsius
+SCAN_TIMEOUT = 10.0
 
-# Global flag for window status
-window_closed = asyncio.Event()
 
-# Plot objects, created once in main() and updated in place thereafter.
-fig = None
-im = None
+# ---------------------------------------------------------------------------
+# BLE lifecycle
 
-def update_plot():
-    """Update live heatmap plot in place (no new figures, no window churn)."""
-    if window_closed.is_set() or not plt.fignum_exists(fig.number):
-        return
-    im.set_data([full_buffer])
-    fig.canvas.draw_idle()
-    fig.canvas.flush_events()
+async def discover(expected: str | None, timeout: float):
+    """Scan for the first device speaking a known protocol.
 
-def notification_handler(_, data):
-    """Handle incoming BLE notifications."""
-    global full_buffer
+    Args:
+        expected: Protocol name to insist on, or None to accept any registered protocol.
+        timeout: Seconds to scan.
 
-    if window_closed.is_set():
-        return
-
-    if len(data) != 19:
-        print(f"Unexpected packet length: {len(data)}")
-        return
-
-    protocol, packet_id, reserved, *temps = struct.unpack("<BBB8h", data)
-    temps = [t / 10.0 for t in temps]
-
-    start_idx = packet_id * 8
-    for i, t in enumerate(temps):
-        full_buffer[start_idx + i] = t
-
-    update_plot()
-
-def on_close(event):
-    """Matplotlib window close callback."""
-    print("Window closed — exiting...")
-    window_closed.set()  # trigger async shutdown
-
-async def main():
-    global window_closed, fig, im
-
+    Returns:
+        A (device, protocol) pair, or (None, None) if nothing matched.
+    """
     print("Scanning for BLE device...")
-    devices = await BleakScanner.discover()
-    device = next((d for d in devices if d.name == DEVICE_NAME), None)
-    if not device:
-        print(f"Device '{DEVICE_NAME}' not found")
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    for dev, adv in found.values():
+        protocol = identify_protocol(dev, adv, expected)
+        if protocol is not None:
+            print(f"Found {adv.local_name or dev.name} ({dev.address}, rssi {adv.rssi}) "
+                  f"speaking '{protocol.name}'")
+            return dev, protocol
+    wanted = f"'{expected}'" if expected else f"any of {protocol_names()}"
+    print(f"No device speaking {wanted} found")
+    return None, None
+
+
+async def stream(device, protocol: TireBleProtocol, state: TireState, window_closed: asyncio.Event):
+    """Connect, subscribe, and hold the link until the device drops or the window closes."""
+
+    def on_disconnect(_client):
+        """bleak disconnect callback: flip the banner, keep the window alive."""
+        state.connected = False
+        print("Device disconnected — close the window to exit.")
+
+    def make_handler(uuid: str):
+        """Bind a notification callback to the characteristic it subscribes to."""
+        def handle(_sender, data: bytearray):
+            try:
+                protocol.decode(uuid, bytes(data), state)
+            except (ValueError, KeyError) as exc:
+                print(exc)
+        return handle
+
+    client = BleakClient(device, disconnected_callback=on_disconnect)
+    try:
+        await client.connect()
+        state.connected = True
+        print("Connected to", device.address)
+        for uuid in protocol.characteristic_uuids():
+            await client.start_notify(uuid, make_handler(uuid))
+        while not window_closed.is_set() and client.is_connected:
+            state.connected = client.is_connected
+            await asyncio.sleep(0.25)
+        state.connected = client.is_connected
+    except Exception as exc:
+        state.connected = False
+        print(f"BLE error: {exc}")
+    finally:
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=3.0)
+        except Exception:
+            pass
+
+
+async def main(args):
+    """Discover, then stream into a dashboard until the window closes."""
+    device, protocol = await discover(args.protocol, args.scan_timeout)
+    if device is None:
         return
 
-    async with BleakClient(device) as client:
-        print("Connected to", DEVICE_NAME)
-        await client.start_notify(CHAR_UUID, notification_handler)
+    state = TireState()
+    window_closed = asyncio.Event()
+    dash = Dashboard(state, protocol, window_closed)
+    render = asyncio.create_task(render_loop(dash))
+    try:
+        await stream(device, protocol, state, window_closed)
+        # Device is gone but the window is still open: keep it responsive so the
+        # user can close it.
+        while not window_closed.is_set():
+            await asyncio.sleep(0.1)
+    finally:
+        window_closed.set()
+        render.cancel()
+        try:
+            await render
+        except asyncio.CancelledError:
+            pass
+        plt.close("all")
 
-        # Setup live plotting (created once; notification_handler only mutates it)
-        plt.ion()
-        fig = plt.figure(figsize=(8, 2))
-        fig.canvas.mpl_connect("close_event", on_close)
-        ax = fig.add_subplot()
-        im = ax.imshow([full_buffer], cmap="inferno", aspect="auto", vmin=VMIN, vmax=VMAX)
-        fig.colorbar(im, ax=ax, label="°C")
-        ax.set_title("16-column Thermal Strip")
-        ax.set_yticks([])
-        ax.set_xticks(range(FULL_COLUMNS))
 
-        # Wait until window is closed
-        await window_closed.wait()
+def parse_args():
+    """Command-line options: --protocol override and --scan-timeout."""
+    parser = argparse.ArgumentParser(description="Live dashboard for a BLE tire temperature sensor.")
+    parser.add_argument("--protocol", choices=protocol_names(), default=None,
+                        help="insist on this wire protocol instead of auto-detecting from the advertisement")
+    parser.add_argument("--scan-timeout", type=float, default=SCAN_TIMEOUT,
+                        help=f"seconds to scan for a device (default: {SCAN_TIMEOUT:g})")
+    return parser.parse_args()
 
-        print("Stopping BLE notifications and closing...")
-        await client.stop_notify(CHAR_UUID)
-        plt.close(fig)
-        sys.exit(0)
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(main(parse_args()))
     except KeyboardInterrupt:
         print("Interrupted — exiting...")

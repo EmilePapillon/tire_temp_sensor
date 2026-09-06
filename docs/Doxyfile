@@ -1,0 +1,44 @@
+# Doxygen configuration for tire_temp_sensor.
+#
+#   doxygen docs/Doxyfile        # writes docs/api/html (git-ignored)
+#
+# Warnings are errors: every function, template parameter, parameter and
+# return value must be documented. CI runs this on every push.
+
+PROJECT_NAME           = "tire_temp_sensor"
+PROJECT_BRIEF          = "MLX90641 tire temperature sensor firmware for the Adafruit Feather nRF52832"
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = README.md lib include src test/mocks test/fixtures
+USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_ID_STYLE      = GITHUB
+# test/mocks and test/fixtures are header-only and #include their .inl/.inc
+# siblings by a path relative to test/ (matching how PlatformIO's
+# CPPPATH=[$PROJECT_TEST_DIR] resolves the same includes for real
+# compilation) -- tell Doxygen's preprocessor to search there too.
+INCLUDE_PATH           = test
+FILE_PATTERNS          = *.hh *.inl *.cc *.cpp *.md
+RECURSIVE              = YES
+EXTENSION_MAPPING      = inl=C++
+EXCLUDE_PATTERNS       = */build_info.hh
+
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = YES
+
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+QUIET                  = YES
+
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = "__attribute__(x)=" "__has_include(x)=0"
+
+# Explicit, not left to the packaged default: Debian/Ubuntu's doxygen ships
+# with HAVE_DOT baked in as YES (unlike Homebrew's), which fails hard if
+# graphviz isn't installed alongside it. Both CI jobs install graphviz.
+HAVE_DOT               = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+SOURCE_BROWSER         = YES

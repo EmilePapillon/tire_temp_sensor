@@ -1,137 +1,153 @@
+/// @file main.cpp
+/// @brief Composition root: construct the concrete pieces, wire them together, run.
+///
+/// Protocol framing, naming and GATT setup live in lib/ble_protocol; board glue
+/// in include/. Tunables live in config.hh.
 #include <Arduino.h>
-#include "arduino_wire.hh"
-#include "mlx90641_driver.hh"
-#include "BLE_gatt.h"
-#include <bluefruit.h>
-#include "data_pack.hh"
-#include "arduino_logger.hh"
 #include <cstdio>
+#include "arduino_logger.hh"
+#include "arduino_wire.hh"
+#include "battery.hh"
+#include "bluefruit_ble_peripheral.hh"
+#include "config.hh"
+#include "i2c_adapter.hh"
+#include "mlx90641_driver.hh"
+#include "rejsa_ble_protocol.hh"
+#include "serial_frame_stream.hh"
+#include "tire_telemetry.hh"
+#include "watchdog.hh"
 
-constexpr uint8_t mlx90641_i2c_addr = 0x33; // MLX90641 I2C address
-constexpr size_t ee_data_size = 832u;
-constexpr size_t frame_data_size = 834u;
-constexpr size_t num_pixels = 192u;  // 16x12
+// Git revision stamped in by scripts/build_info.py (extra_scripts in platformio.ini).
+#if __has_include("build_info.hh")
+#include "build_info.hh"
+#else
+/// @brief Fallback revision string when the build stamp was not generated.
+#define BUILD_VERSION "unknown"
+#endif
 
-constexpr float temp_scaling = 1.00f; // Default = 1.00
-constexpr int temp_offset = 0;       // Default = 0 (in tenths of degrees Celsius)
+namespace {
 
-uint8_t macaddr[6];
-uint16_t eeData[ee_data_size];
-uint16_t frameData[frame_data_size];
-float tempData[num_pixels];
-char rowBuf[512];
-Wire wire; 
-I2CAdapter i2c_adapter(wire);
-ArduinoLogger logger(Logger::Level::INFO); // Change to DEBUG for more verbosity
-mlx90641::MLX90641Sensor mlx_sensor(i2c_adapter, mlx90641_i2c_addr, &logger);
-DataPack datapack;
+ArduinoWire wire;                                   ///< The I2C bus.
+I2CAdapter<ArduinoWire> i2c_adapter(wire);          ///< Register-level access over the bus.
+/// The thermal sensor, logging through Serial.
+mlx90641::MLX90641Sensor<I2CAdapter<ArduinoWire>, ArduinoLogger> mlx_sensor(i2c_adapter, config::mlx90641_i2c_addr);
+BluefruitBlePeripheral peripheral;                  ///< The BLE radio.
+/// The wire protocol selected in config.hh, driving the radio.
+config::ActiveBleProtocol ble_protocol(peripheral, config::ble_advertising);
+ArduinoLogger logger;                               ///< Logger for main.cpp's own messages.
+TireTelemetry telemetry{};                          ///< The sample being assembled for publish().
 
+/// @brief Refresh the battery fields of `telemetry` from the ADC.
+///
+/// Reads once on the first call, then at most every config::battery_refresh_ms.
+/// Unsigned subtraction keeps this correct across the 49-day millis() wraparound.
+void refresh_battery() {
+    static bool read_once = false;
+    static uint32_t last_read_ms = 0;
+    const uint32_t now = millis();
+    if (read_once && (now - last_read_ms) < config::battery_refresh_ms) {
+        return;
+    }
+    read_once = true;
+    last_read_ms = now;
+    telemetry.battery_mv = battery_read_millivolts();
+    telemetry.battery_pct = battery_lipo_percent(telemetry.battery_mv);
+}
 
+/// @brief Read one frame, retrying up to config::frame_read_max_retries times.
+/// @return True if a frame was acquired.
+bool read_frame_with_retries() {
+    for (uint8_t attempt = 1; attempt <= config::frame_read_max_retries; attempt++) {
+        watchdog_feed();  // a frame read may legitimately take several seconds to time out
+        const mlx90641::Status status = mlx_sensor.read_frame();
+        if (status == mlx90641::Status::Success) {
+            return true;
+        }
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Frame read failed (%s), retry %u/%u", mlx90641::status_name(status), attempt,
+                 config::frame_read_max_retries);
+        logger.log(LogLevel::DEBUG, msg);
+        delay(1);
+    }
+    return false;
+}
+
+/// @brief Log the reason and stop feeding the watchdog: the board resets itself.
+/// @param reason Message logged at ERROR level.
+void halt(const char* reason) {
+    logger.log(LogLevel::ERROR, reason);
+    logger.log(LogLevel::ERROR, "Halting; the watchdog will reset the board.");
+    while (true) {
+        delay(1000);
+    }
+}
+
+}  // namespace
+
+/// @brief Arduino entry point: arm the watchdog, bring up sensor, battery and BLE.
 void setup() {
-    Serial.begin(115200);
-    logger.log(Logger::Level::INFO, "Starting setup...");
+    watchdog_begin(config::watchdog_timeout_s);
 
-    logger.log(Logger::Level::INFO, "Initializing MLX90641 sensor...");
-    bool result = mlx_sensor.init();
-    if (!result) {
-        logger.log(Logger::Level::ERROR, "Failed to initialize MLX90641!");
-        while (1) delay(1000);
+    Serial.begin(config::serial_baud);
+    logger.log(LogLevel::INFO, "Firmware build " BUILD_VERSION);
+    logger.log(LogLevel::INFO, "Starting setup...");
+
+    logger.log(LogLevel::INFO, "Initializing MLX90641 sensor...");
+    const mlx90641::Status sensor_status = mlx_sensor.init(config::mlx90641_config);
+    if (sensor_status != mlx90641::Status::Success) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to initialize MLX90641: %s", mlx90641::status_name(sensor_status));
+        halt(msg);
     }
-    logger.log(Logger::Level::INFO, "MLX90641 initialized successfully");
+    logger.log(LogLevel::INFO, "MLX90641 initialized successfully");
 
-    delay(5000);
-    // START UP BLUETOOTH
-    logger.log(Logger::Level::INFO, "Starting Bluetooth...");
-    Bluefruit.begin();
-    Bluefruit.getAddr(macaddr);
-    char macMsg[64];
-    snprintf(macMsg, sizeof(macMsg), "Starting bluetooth with MAC address %02X:%02X:%02X:%02X:%02X:%02X",
-             macaddr[5], macaddr[4], macaddr[3], macaddr[2], macaddr[1], macaddr[0]);
-    logger.log(Logger::Level::INFO, macMsg);
-    Bluefruit.setName("MLX90641");
-    logger.log(Logger::Level::INFO, "Bluetooth initialized");
+    battery_begin();
+    refresh_battery();
 
-    // RUN BLUETOOTH GATT
-    logger.log(Logger::Level::INFO, "Setting up GATT services...");
-    setupMainService();
-    startAdvertising();
-    logger.log(Logger::Level::INFO, "Setup complete - Running!");
+    watchdog_feed();
+    delay(config::boot_delay_ms);
+    watchdog_feed();
+
+    logger.log(LogLevel::INFO, "Starting Bluetooth...");
+    if (!peripheral.begin()) {
+        halt("Failed to start the BLE radio!");
+    }
+    const DeviceIdentity identity{peripheral.mac_address(), config::wheel_corner};
+    {
+        const auto& mac = identity.mac_address;
+        char msg[64];
+        snprintf(msg, sizeof(msg), "BLE MAC address %02X:%02X:%02X:%02X:%02X:%02X", mac[5], mac[4], mac[3], mac[2],
+                 mac[1], mac[0]);
+        logger.log(LogLevel::INFO, msg);
+    }
+
+    if (!ble_protocol.begin(identity)) {
+        halt("Failed to register the BLE GATT services!");
+    }
+    logger.log(LogLevel::INFO, ble_protocol.device_name());
+    logger.log(LogLevel::INFO, "Setup complete - Running!");
 }
 
-
-
-void sendColumnAveragesBLE(float* avgColumns16) {
-    if (!Bluefruit.connected()) return;
-
-    for (uint8_t packetId = 0; packetId < 2; packetId++) {
-        datapack.protocol = 1;
-        datapack.packet_id = packetId;
-        datapack.reserved = 0;
-
-        // Fill 8 temps for this half
-        for (uint8_t i = 0; i < 8; i++) {
-            uint8_t col = i + packetId * 8;
-            datapack.temps[i] = static_cast<int16_t>(avgColumns16[col] * 10.0f);
-        }
-
-        GATTone.notify((uint8_t*)&datapack, sizeof(datapack));
-        delay(5); // small delay to avoid BLE congestion
-    }
-}
-
+/// @brief Arduino main loop: one frame in, one telemetry sample out.
 void loop() {
-    logger.log(Logger::Level::DEBUG, "Starting new loop iteration");
+    watchdog_feed();
 
-    const int maxRetries = 5;
-    int retries = 0;
-    bool frameSuccess = false;
-
-    logger.log(Logger::Level::DEBUG, "Attempting to read frame...");
-    while (!frameSuccess && retries < maxRetries) {
-        frameSuccess = mlx_sensor.read_frame();
-        if (!frameSuccess) {
-            retries++;
-            char msg[48];
-            snprintf(msg, sizeof(msg), "Frame read failed, retry %d/%d", retries, maxRetries);
-            logger.log(Logger::Level::DEBUG, msg);
-            delay(1); // short delay before retry
-        }
-    }
-
-    // If still failed after max retries, skip this iteration entirely
-    if (!frameSuccess) {
-        logger.log(Logger::Level::ERROR, "Missed frame, all retries failed. Skipping notification.");
+    logger.log(LogLevel::DEBUG, "Attempting to read frame...");
+    if (!read_frame_with_retries()) {
+        logger.log(LogLevel::ERROR, "Missed frame, all retries failed. Skipping notification.");
         return;
     }
 
-    logger.log(Logger::Level::DEBUG, "Frame read successful, calculating temperatures...");
     mlx_sensor.calculate_temps();
-    logger.log(Logger::Level::DEBUG, "Temperature calculation complete");
+    const auto temps = mlx_sensor.get_temps();
 
-    auto tempData = mlx_sensor.get_temps();
-    {
-        char msg[160];
-        int offset = snprintf(msg, sizeof(msg), "Retrieved temperature array: ");
-        for (size_t i = 0; i < 10 && offset < (int)sizeof(msg); i++) {
-            offset += snprintf(msg + offset, sizeof(msg) - offset, "%.2f, ", tempData[i]);
-        }
-        logger.log(Logger::Level::DEBUG, msg);
+    if (config::stream_frames_over_serial) {
+        serial_stream_frame(temps);
     }
 
-    Serial.write((uint8_t*)tempData.data(), tempData.size() * sizeof(float));
+    telemetry.column_temps_c = mlx90641::column_averages(temps);
+    refresh_battery();
 
-    logger.log(Logger::Level::DEBUG, "Calculating column averages...");
-    // Row 0, pixels [0 .. 15]
-    float colAvg[16];
-    for (int col = 0; col < 16; col++) {
-        float sum = 0.0f;
-        for (int row = 0; row < 12; row++) {
-            sum += tempData[row * 16 + col];  // row-major order
-        }
-        colAvg[col] = sum / 12.0f;  // average of this column
-    }
-
-    logger.log(Logger::Level::DEBUG, "Sending BLE data...");
-    sendColumnAveragesBLE(colAvg);
-    logger.log(Logger::Level::DEBUG, "Loop iteration complete");
+    ble_protocol.poll();
+    ble_protocol.publish(telemetry);
 }

@@ -2,7 +2,7 @@
 #include <array>
 #include "mlx90641_eeprom_parser.hh"
 #include "mlx90641_params.hh"
-#include "test_data_mlx90641_eeprom.hh"
+#include "fixtures/mlx90641_eeprom_fixture.hh"
 
 using namespace mlx90641;
 

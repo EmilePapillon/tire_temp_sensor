@@ -7,11 +7,12 @@
 ## Testing
 <!-- How did you test this? -->
 
-## (optional) Refernce to Requirement or other relevant Doc
+## (optional) Reference to requirement or other relevant doc
 <!-- Paste links to design in google docs  -->
 
 ## Checklist
 - [ ] Code builds and passes tests
 - [ ] Unit test coverage is appropriate
-- [ ] Updated docs if needed
+- [ ] New functions carry Doxygen docs (`doxygen docs/Doxyfile` passes)
+- [ ] README updated if behaviour, layout or configuration changed
 
