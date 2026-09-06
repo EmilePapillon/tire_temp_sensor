@@ -70,7 +70,9 @@ void test_alpha_scale_preserves_sixth_bit() {
     const auto pixel_alpha = static_cast<float>(data[EepromAddr::alpha_pixel - eeprom_start_address] & 0x07FF);
     const auto expected = pixel_alpha * (row_max / static_cast<float>(1ULL << 52U)) / 2047.0f;
 
-    TEST_ASSERT_FLOAT_WITHIN(float_epsilon, expected, alpha[0]);
+    // Relative tolerance: with the sixth bit set the scale exponent is 52, so expected is
+    // ~2e-13 and an absolute 1e-4 window would pass for almost any alpha[0].
+    TEST_ASSERT_FLOAT_WITHIN(expected * 1e-4f, expected, alpha[0]);
 }
 
 void test_kta() {

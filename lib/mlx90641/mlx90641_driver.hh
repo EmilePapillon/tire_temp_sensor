@@ -21,7 +21,7 @@ enum class Status : uint8_t {
     Success = 0,                  ///< The operation completed.
     I2cNack,                      ///< The sensor did not acknowledge on the bus.
     I2cBusError,                  ///< Bus-level failure (overflow, timeout).
-    I2cNoData,                    ///< The sensor returned no bytes on a read.
+    I2cNoData,                    ///< The sensor returned fewer bytes than requested on a read.
     I2cVerifyMismatch,            ///< A register write did not read back as written.
     NotAnMlx90641,                ///< EEPROM device-select bit not set.
     EepromCorrupt,                ///< Uncorrectable Hamming error in the EEPROM dump.
