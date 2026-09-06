@@ -31,7 +31,14 @@ ArduinoWire wire;                                   ///< The I2C bus.
 I2CAdapter<ArduinoWire> i2c_adapter(wire);          ///< Register-level access over the bus.
 /// The thermal sensor, logging through Serial.
 mlx90641::MLX90641Sensor<I2CAdapter<ArduinoWire>, ArduinoLogger> mlx_sensor(i2c_adapter, config::mlx90641_i2c_addr);
-BluefruitBlePeripheral peripheral;                  ///< The BLE radio.
+/// @brief Radio settings: the config.hh tunables plus the active protocol's notify burst.
+/// @return config::ble_peripheral with notify_burst overlaid from ActiveBleProtocol.
+constexpr ble::PeripheralConfig peripheral_config() {
+    ble::PeripheralConfig cfg = config::ble_peripheral;
+    cfg.notify_burst = config::ActiveBleProtocol::notifications_per_publish;
+    return cfg;
+}
+BluefruitBlePeripheral peripheral{peripheral_config()};  ///< The BLE radio.
 /// The wire protocol selected in config.hh, driving the radio.
 config::ActiveBleProtocol ble_protocol(peripheral, config::ble_advertising);
 ArduinoLogger logger;                               ///< Logger for main.cpp's own messages.
@@ -94,6 +101,16 @@ void setup() {
 
     logger.log(LogLevel::INFO, "Initializing MLX90641 sensor...");
     const mlx90641::Status sensor_status = mlx_sensor.init(config::mlx90641_config);
+    switch (wire.recovery()) {
+        case ArduinoWire::BusRecovery::Recovered:
+            logger.log(LogLevel::WARN, "I2C bus was held low at boot; freed it by clocking SCL");
+            break;
+        case ArduinoWire::BusRecovery::Failed:
+            logger.log(LogLevel::ERROR, "I2C bus still held low after recovery; power-cycle the sensor");
+            break;
+        case ArduinoWire::BusRecovery::NotNeeded:
+            break;
+    }
     if (sensor_status != mlx90641::Status::Success) {
         char msg[64];
         snprintf(msg, sizeof(msg), "Failed to initialize MLX90641: %s", mlx90641::status_name(sensor_status));

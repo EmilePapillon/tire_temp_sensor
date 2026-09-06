@@ -46,14 +46,16 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 |---|---|---|
 | `wheel_corner` | `FL` | Advertised in the device name; set per board |
 | `log_level` | `INFO` | `DEBUG` prints per-frame chatter |
-| `stream_frames_over_serial` | `true` | Raw frames for `serial_viz.py`, see below |
+| `stream_frames_over_serial` | `false` | Raw frames for `serial_viz.py` (bench aid for calibration and positioning); its blocking UART write paces `loop()` at ~11 Hz, so off for the car |
 | `mlx90641_i2c_addr` | `0x33` | |
-| `mlx90641_config` | 400 kHz, 19-bit, 32 Hz, 50 000 polls | Bus speed, ADC resolution, frame rate, data-ready poll limit |
+| `mlx90641_refresh_rate` | `Hz8` | Sensor frame rate; `loop()` and the BLE publish rate follow it. `Hz32`/`Hz64` for full-throttle tests |
+| `mlx90641_config` | 400 kHz, 19-bit, `mlx90641_refresh_rate`, 50 000 polls | Bus speed, ADC resolution, frame rate, data-ready poll limit |
 | `frame_read_max_retries` | 5 | Per `loop()` iteration |
 | `battery_refresh_ms` | 60 000 | How often the LiPo is sampled |
 | `boot_delay_ms` | 5 000 | Grace period to attach a monitor before the radio starts |
 | `watchdog_timeout_s` | 8 | Must exceed the boot delay and one frame-read timeout |
 | `ble_advertising` | +4 dBm, 100 ms | TX power, advertising intervals and timeouts |
+| `ble_peripheral` | interval 0/0 | Connection-level radio settings. `notify_burst` is overlaid from the active protocol; connection interval in 1.25 ms units, 0 = stack default, `6`/`12` (7.5–15 ms) for full-throttle tests |
 | `ActiveBleProtocol` | `RejsaBleProtocol<BluefruitBlePeripheral>` | The wire protocol this build speaks |
 
 ## What the firmware does
@@ -74,7 +76,7 @@ The device name is `RejsaRubber` + corner + the last three MAC bytes in hex, e.g
 
 **Serial frame stream.** When enabled, every frame is also written to the USB serial port as the 4-byte magic `AA 55 54 54` followed by 192 little-endian `float32` values in row-major order. Text logs share the port; the magic is how `scripts/vizualisation/serial_viz.py` finds frame boundaries.
 
-**Supervision.** The nRF52 watchdog is fed once per `loop()` and once per frame-read attempt. A wedged sensor, a stuck bus or a fatal init error all end in a reset rather than a hung board; the `Firmware build` log line tells you which revision came back up.
+**Supervision.** The nRF52 watchdog is fed once per `loop()` and once per frame-read attempt. A wedged sensor, a stuck bus or a fatal init error all end in a reset rather than a hung board; the `Firmware build` log line tells you which revision came back up. Before the bus starts, `ArduinoWire::begin()` checks for a slave holding SDA low (left over from a reset mid-transfer) and frees it by clocking SCL; the outcome is logged at boot.
 
 ## Project layout
 

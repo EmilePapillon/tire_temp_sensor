@@ -11,7 +11,7 @@ from tire_protocols import FULL_COLUMNS, PAIR_ZONES, TireBleProtocol, TireState
 
 TEMP_VMIN, TEMP_VMAX = 20, 40  # degrees Celsius color scale
 STALE_AFTER = 2.0              # seconds without a packet -> "no data"
-RENDER_HZ = 15
+RENDER_HZ = 30                 # ticks per second; a tick only repaints if something changed
 
 
 def _batt_color(pct):
@@ -26,8 +26,10 @@ def _batt_color(pct):
 
 
 class Dashboard:
-    """The window is repainted from render_loop() on a fixed timer, so it stays
-    responsive (and closable) even when BLE notifications stop."""
+    """The window is ticked from render_loop() on a fixed timer, so it stays
+    responsive (and closable) even when BLE notifications stop. A tick repaints
+    only when the state's revision or the status banner changed; otherwise it
+    just pumps GUI events. Protocol-agnostic: it reads TireState and nothing else."""
 
     def __init__(self, state: TireState, protocol: TireBleProtocol, window_closed: asyncio.Event):
         """Build the figure.
@@ -80,15 +82,40 @@ class Dashboard:
         self.status = self.fig.suptitle("connecting…", color="0.4", fontsize=12)
         self.fig.canvas.mpl_connect("close_event", lambda _e: window_closed.set())
 
+        # Lay out once, then freeze: re-running the constrained-layout solver on
+        # every repaint was most of the per-frame cost.
+        self.fig.canvas.draw()
+        self.fig.set_layout_engine("none")
+
+        self._painted_revision = -1
+        self._painted_status = None
+
     def alive(self):
         """Whether the figure window is still open."""
         return plt.fignum_exists(self.fig.number)
 
-    def refresh(self):
-        """Repaint every element from the current state."""
+    def _status(self):
+        """(text, colour) for the banner, derived from connection and packet age."""
         state = self.state
-        now = time.monotonic()
-        fresh = state.last_packet > 0.0 and (now - state.last_packet < STALE_AFTER)
+        fresh = state.last_packet > 0.0 and (time.monotonic() - state.last_packet < STALE_AFTER)
+        if not state.connected:
+            return "○  DISCONNECTED — device off / out of range", "#c62828"
+        if fresh:
+            return "●  CONNECTED — streaming", "#2e7d32"
+        return "●  CONNECTED — no data", "#f9a825"
+
+    def refresh(self):
+        """Repaint if the state or banner changed since the last paint; else just pump events."""
+        state = self.state
+        status = self._status()
+        if state.revision == self._painted_revision and status == self._painted_status:
+            try:
+                self.fig.canvas.flush_events()
+            except Exception:
+                self.window_closed.set()
+            return
+        self._painted_revision = state.revision
+        self._painted_status = status
 
         self.im_full.set_data([state.columns])
         self.im_pair.set_data([state.pair_zones])
@@ -103,15 +130,9 @@ class Dashboard:
             self.batt_text.set_text(f"{pct}%  ·  {mv} mV")
             self.batt_text.set_y(min(max(pct, 8), 92))
 
-        if not state.connected:
-            self.status.set_text("○  DISCONNECTED — device off / out of range")
-            self.status.set_color("#c62828")
-        elif fresh:
-            self.status.set_text("●  CONNECTED — streaming")
-            self.status.set_color("#2e7d32")
-        else:
-            self.status.set_text("●  CONNECTED — no data")
-            self.status.set_color("#f9a825")
+        text, color = status
+        self.status.set_text(text)
+        self.status.set_color(color)
 
         try:
             self.fig.canvas.draw_idle()

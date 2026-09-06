@@ -36,17 +36,24 @@ constexpr LogLevel log_level = LogLevel::INFO;
 /// Serial port baud rate.
 constexpr uint32_t serial_baud = 115200;
 /// Stream every raw 12x16 float frame over Serial for scripts/vizualisation/serial_viz.py.
-constexpr bool stream_frames_over_serial = true;
+/// A bench aid for calibration and physical positioning that bypasses BLE. The car build
+/// only uses BLE, and the 772-byte blocking UART write would pace loop() at ~11 Hz, so off.
+constexpr bool stream_frames_over_serial = false;
 
 // --- MLX90641 ----------------------------------------------------------------
 
 /// 7-bit I2C address of the sensor.
 constexpr uint8_t mlx90641_i2c_addr = 0x33;
+/// Sensor frame rate; loop() and the BLE publish rate follow it. Hz8 for the car: a tyre's
+/// thermal time constant is seconds, and lower rates cut radio/I2C load and improve NETD.
+/// Hz32/Hz64 (paired with a 7.5 ms connection interval in ble_peripheral below) to test
+/// end-to-end responsiveness at full throttle.
+constexpr mlx90641::RefreshRate mlx90641_refresh_rate = mlx90641::RefreshRate::Hz8;
 /// Bus speed, resolution, frame rate and polling limit programmed at init.
 constexpr mlx90641::Mlx90641Config mlx90641_config{
     400,                           // I2C bus frequency, kHz
     mlx90641::Resolution::Bits19,  // ADC resolution
-    mlx90641::RefreshRate::Hz32,   // frame rate
+    mlx90641_refresh_rate,         // frame rate
     50000,                         // status-register polls before a frame read gives up (~5 s at 400 kHz)
 };
 /// Frame read attempts per loop() before the iteration is skipped.
@@ -75,6 +82,15 @@ constexpr ble::AdvertisingParams ble_advertising{
     30,    // fast_timeout_s
     0,     // timeout_s, 0 = advertise forever
     true,  // restart_on_disconnect
+};
+
+/// Connection-level radio settings. notify_burst is overlaid by main.cpp from the active
+/// protocol. Interval 0/0 keeps the stack default (20-30 ms preferred, the central decides);
+/// 6/12 asks for 7.5-15 ms for full-throttle tests, at a radio-power cost.
+constexpr ble::PeripheralConfig ble_peripheral{
+    1,  // notify_burst; overlaid from ActiveBleProtocol::notifications_per_publish in main.cpp
+    0,  // conn_interval_min, 1.25 ms units; 0 = stack default
+    0,  // conn_interval_max, 1.25 ms units; 0 = stack default
 };
 
 // --- Active BLE wire protocol ------------------------------------------------

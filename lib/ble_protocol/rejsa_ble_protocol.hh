@@ -20,6 +20,7 @@
 ///
 /// "BleTireProtocol" shape (what main.cpp drives, shared with future protocols):
 /// @code
+///     static constexpr std::size_t notifications_per_publish;  // radio TX-queue sizing
 ///     bool begin(const DeviceIdentity& identity);  // name + GATT + advertising
 ///     bool is_ready();                             // a consumer can receive data
 ///     bool publish(const TireTelemetry& telemetry);
@@ -45,6 +46,7 @@ public:
     static constexpr std::size_t packet_size = 20;        ///< Wire size of each packet in bytes.
     static constexpr std::size_t device_name_len = 19;    ///< "RejsaRubber" + "FL" + 6 hex digits.
     static constexpr std::size_t temps_per_packet = TireTelemetry::num_columns / 2;  ///< Temp slots per packet.
+    static constexpr std::size_t notifications_per_publish = 3;  ///< publish() notifies 0x01, 0x02, 0x03 back to back.
 
     /// @brief Bind to a radio and remember how to advertise on it.
     /// @param peripheral The radio; must outlive this object.
