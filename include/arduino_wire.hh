@@ -12,8 +12,23 @@
 /// the framework's global instance of the same name.
 class ArduinoWire {
 public:
-    /// @brief Start the bus (TwoWire::begin).
+    /// @brief What begin() found on the bus before starting it.
+    enum class BusRecovery : uint8_t {
+        NotNeeded,  ///< SDA was high: the bus was idle.
+        Recovered,  ///< SDA was held low; clocking SCL freed it.
+        Failed,     ///< SDA still low after nine clocks; expect the sensor to fail init.
+    };
+
+    /// @brief Free a slave holding SDA low, then start the bus (TwoWire::begin).
+    ///
+    /// A reset mid-transfer (reflash, watchdog) leaves the sensor waiting for
+    /// clocks with SDA pinned low; TWI cannot start on a busy bus and only a
+    /// power cycle would clear it. Clocking SCL up to nine times lets the slave
+    /// finish its byte, then a STOP condition releases the bus.
     void begin();
+
+    /// @brief Outcome of the recovery check. Valid after begin().
+    BusRecovery recovery() const;
 
     /// @brief Set the bus clock.
     /// @param freq_hz Frequency in Hz.
@@ -56,6 +71,9 @@ public:
     /// @brief Busy-wait.
     /// @param us Microseconds.
     void delay_microseconds(uint32_t us);
+
+private:
+    BusRecovery recovery_ = BusRecovery::NotNeeded;  ///< Set by begin().
 };
 
 static_assert(is_wire<ArduinoWire>::value, "ArduinoWire must satisfy the Wire shape");

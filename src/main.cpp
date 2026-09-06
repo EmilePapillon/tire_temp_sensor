@@ -94,6 +94,16 @@ void setup() {
 
     logger.log(LogLevel::INFO, "Initializing MLX90641 sensor...");
     const mlx90641::Status sensor_status = mlx_sensor.init(config::mlx90641_config);
+    switch (wire.recovery()) {
+        case ArduinoWire::BusRecovery::Recovered:
+            logger.log(LogLevel::WARN, "I2C bus was held low at boot; freed it by clocking SCL");
+            break;
+        case ArduinoWire::BusRecovery::Failed:
+            logger.log(LogLevel::ERROR, "I2C bus still held low after recovery; power-cycle the sensor");
+            break;
+        case ArduinoWire::BusRecovery::NotNeeded:
+            break;
+    }
     if (sensor_status != mlx90641::Status::Success) {
         char msg[64];
         snprintf(msg, sizeof(msg), "Failed to initialize MLX90641: %s", mlx90641::status_name(sensor_status));
