@@ -1,6 +1,6 @@
 # Tire Temperature Sensor BLE Firmware
 
-This project is firmware for an Adafruit Feather nRF52832 board that reads tire surface temperatures using an MLX90641 IR sensor and broadcasts the data via Bluetooth Low Energy (BLE). The firmware averages sensor readings, packages them, and sends them using custom BLE GATT services.
+This project is firmware for an Adafruit Feather nRF52832 board that reads tire surface temperatures using an MLX90641 IR sensor and broadcasts the data via Bluetooth Low Energy (BLE). The firmware averages each of the sensor's 16 columns and publishes them over the [RejsaRubberTrac](https://github.com/MagnusThome/RejsaRubberTrac) BLE protocol, which RaceChrono and Harry's LapTimer decode natively. The wire protocol is a swappable, compile-time-selected piece so other protocols (e.g. RaceChrono DIY) can be added alongside it.
 
 ## Quick Start
 
@@ -10,6 +10,45 @@ This project is firmware for an Adafruit Feather nRF52832 board that reads tire 
    ```sh
    pio run -e adafruit_feather_nrf52832 --target upload
    ```
+
+## Build stamping
+
+Every firmware build logs the git revision it was built from on boot (`Firmware build v1.2-3-g1387909-dirty`). [`scripts/build_info.py`](scripts/build_info.py) runs before each build and regenerates `include/build_info.hh` from the working tree, so nothing has to be updated by hand; `-dirty` means uncommitted changes were flashed. The header is git-ignored.
+
+## Configuration
+
+Every per-board / per-deployment tunable lives in [`include/config.hh`](include/config.hh): wheel corner, log level, MLX90641 I²C address / bus speed / resolution / refresh rate, battery refresh interval, BLE TX power and advertising intervals, and the active BLE protocol (`config::ActiveBleProtocol`). Modules carry no hidden defaults of their own.
+
+## Project layout
+
+The litmus test for where a file lives: **does it need `Arduino.h` / `Bluefruit.h` / `Wire.h` to compile?**
+
+- **No → `lib/<name>/`.** Portable C++, standard library only. Depends on other `lib/` code by template parameter, never on a concrete Arduino type. This is what the `native` environment builds and `test/` exercises on the host.
+- **Yes → `include/` (declarations) + `src/` (definitions).** Board-coupled glue, only exercised by flashing the board.
+
+`src/main.cpp` is the composition root and the one place allowed to know about both sides: it constructs the `include/`-side types and hands them to the `lib/`-side templates.
+
+```
+lib/
+  logger/         LogLevel, the "Logger" shape, NullLogger
+  i2c_adapter/    the "Wire" shape, I2CAdapter<WireT> (register-level I²C)
+  mlx90641/       MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config
+  ble_protocol/   the "BlePeripheral" shape, TireTelemetry/DeviceIdentity, RejsaBleProtocol<PeripheralT>
+  battery/        LiPo voltage -> percent curve
+include/          config.hh, ArduinoWire, ArduinoLogger, BluefruitBlePeripheral, battery ADC glue
+src/              main.cpp (composition root) + the include/ definitions
+test/             host unit tests: test_*/ per suite, mocks/ and fixtures/ shared by include
+scripts/vizualisation/   live dashboards over serial and BLE (see its README)
+```
+
+Dispatch is compile-time everywhere: interfaces are documented "shapes" enforced by a `static_assert` on a small SFINAE trait (`is_wire<T>`, `is_logger<T>`, `is_ble_peripheral<T>`), so a mock only has to implement the same member functions, no inheritance. Collaborators are injected by reference only where a test needs to script or inspect them (the Wire and the BLE peripheral); the logger is owned internally.
+
+## Running the tests
+
+```sh
+pio test -e native                                                     # C++ unit tests on the host
+python -m unittest discover -s scripts/vizualisation -p "test_*.py"    # visualization tooling
+```
 
 ## Contributing
 

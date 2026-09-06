@@ -1,21 +1,21 @@
-
+#pragma once
+#include <cstddef>
 #include <cstdint>
 #include "i_wire.hh"
 
-class Wire : public IWire
-{
+/// @brief Board glue: the "Wire" shape (see i_wire.hh) over Arduino's global TwoWire.
+class ArduinoWire {
 public:
-    ~Wire() = default; 
-    void begin() override;
-    void setClock(uint32_t freq) override;
-    int endTransmission(bool stop)  override;
-    void beginTransmission(uint8_t address) override;
-    uint8_t requestFrom(uint8_t address, std::size_t quantity) override;
-    std::size_t write(uint8_t data) override;
-    std::size_t write(const char* data, std::size_t quantity) override;
-    int available() override;
-    int read() override;
-    int peek() override;
-    void flush() override;
-    void delayMicroseconds(int us) override;
+    void begin();
+    void set_clock(uint32_t freq_hz);
+    void begin_transmission(uint8_t address);
+    int end_transmission(bool stop);
+    std::size_t request_from(uint8_t address, std::size_t quantity);
+    std::size_t write(uint8_t data);
+    std::size_t write(const uint8_t* data, std::size_t quantity);
+    int available();
+    int read();
+    void delay_microseconds(uint32_t us);
 };
+
+static_assert(is_wire<ArduinoWire>::value, "ArduinoWire must satisfy the Wire shape");

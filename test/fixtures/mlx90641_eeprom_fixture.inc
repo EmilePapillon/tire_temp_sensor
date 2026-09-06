@@ -1,6 +1,4 @@
-#include "test_data_mlx90641_eeprom.hh"
-
-namespace mlx90641 {
+// Data tables for mlx90641_eeprom_fixture.hh. Do not include directly.
 const std::array<uint16_t, 832> test_eeprom_data = {
 0x00B7, 0x799F, 0x0000, 0x2031, 0x0004, 0x0320, 0x03E0, 0x101C, 
     0x15E3, 0x018A, 0x0ACD, 0x0000, 0x0901, 0x0000, 0x0000, 0xBE33, 
@@ -218,4 +216,3 @@ const ParamsMLX90641 expected_params = {
     .emissivityEE       = 1.0f,
     .brokenPixels       = {65535, 65535}
 };
-} // namespace mlx90641

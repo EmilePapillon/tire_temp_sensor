@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <cstdint>
+#include "battery_lipo.hh"  // battery_lipo_percent(), pure math in lib/battery
 
 // LiPo battery monitoring for the Adafruit Feather nRF52832.
 //
@@ -24,43 +25,6 @@ inline void battery_begin() {
 
 // Instantaneous battery voltage in millivolts.
 inline uint16_t battery_read_millivolts() {
-    uint32_t raw = analogRead(A7);
+    const uint32_t raw = analogRead(A7);
     return static_cast<uint16_t>(raw * battery_mv_per_lsb * battery_divider_comp);
-}
-
-// Map a LiPo terminal voltage (mV) to an approximate state of charge (0-100 %).
-// Piecewise-linear fit of a typical single-cell LiPo discharge curve; matches the
-// curve used by upstream RejsaRubberTrac so RaceChrono shows familiar numbers.
-inline uint8_t battery_lipo_percent(uint16_t mvolts) {
-    if (mvolts >= 4200) {
-        return 100;
-    }
-    if (mvolts > 4100) {
-        return 90 + (mvolts - 4100) * 10 / 100;
-    }
-    if (mvolts > 4000) {
-        return 80 + (mvolts - 4000) * 10 / 100;
-    }
-    if (mvolts > 3900) {
-        return 70 + (mvolts - 3900) * 10 / 100;
-    }
-    if (mvolts > 3800) {
-        return 50 + (mvolts - 3800) * 20 / 100;
-    }
-    if (mvolts > 3700) {
-        return 30 + (mvolts - 3700) * 20 / 100;
-    }
-    if (mvolts > 3600) {
-        return 20 + (mvolts - 3600) * 10 / 100;
-    }
-    if (mvolts > 3500) {
-        return 10 + (mvolts - 3500) * 10 / 100;
-    }
-    if (mvolts > 3400) {
-        return 2 + (mvolts - 3400) * 8 / 100;
-    }
-    if (mvolts > 3300) {
-        return 1 + (mvolts - 3300) * 1 / 100;
-    }
-    return 1;
 }

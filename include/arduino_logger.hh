@@ -1,22 +1,27 @@
+#pragma once
+#include <Arduino.h>  // for Serial
+#include "config.hh"
 #include "logger.hh"
-#include <Arduino.h> // for Serial
 
-class ArduinoLogger : public Logger {
+/// @brief Board glue: the "Logger" shape (see logger.hh) over Serial.
+///
+/// Default-constructible so lib/ code can own one; the threshold comes straight
+/// from config::log_level.
+class ArduinoLogger {
 public:
-    ArduinoLogger(Level level = Level::INFO) : Logger(level) {}
-    void log(Level level, const char* message) override {
-        const char* level_str = "";
-        if (log_level_ > level) {
-            return; // Skip messages below the current log level
+    explicit ArduinoLogger(LogLevel level = config::log_level) : level_(level) {}
+
+    void log(LogLevel level, const char* message) {
+        if (level < level_) {
+            return;
         }
-        switch (level) {
-            case Level::DEBUG: level_str = "DEBUG"; break;
-            case Level::INFO:  level_str = "INFO";  break;
-            case Level::WARN:  level_str = "WARN";  break;
-            case Level::ERROR: level_str = "ERROR"; break;
-        }
-        Serial.print(level_str);
+        Serial.print(log_level_name(level));
         Serial.print(": ");
         Serial.println(message);
     }
+
+private:
+    LogLevel level_;
 };
+
+static_assert(is_logger<ArduinoLogger>::value, "ArduinoLogger must satisfy the Logger shape");
