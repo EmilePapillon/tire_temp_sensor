@@ -154,16 +154,15 @@ std::array<float, 8> MLX90641EEpromParser::get_ks_to() const
 
 std::array<float, 192> MLX90641EEpromParser::get_alpha() const
 {
-    // note: the datasheet shows that the values for alpha_scale_row altern from 
-    // a bit-width of 5 and 6, but in the melexis library we see that
-    // they are all treated as 5-bit values. This is more intuitive and is
-    // what we will use here.
+    // Each alpha-scale word contains a six-bit upper field and a five-bit
+    // lower field. The upper field must retain bit 5; it is not a five-bit
+    // value despite the ambiguity in some datasheet tables.
     constexpr std::array<SingleEepromWord, 6> scale_row_alpha = {
-    SingleEepromWord{EepromAddr::alpha_scale0, 5, 5, 0, false},   // (eeData[25] >> 5) + 20
+    SingleEepromWord{EepromAddr::alpha_scale0, 5, 6, 0, false},   // (eeData[25] >> 5) + 20
     SingleEepromWord{EepromAddr::alpha_scale0, 0, 5, 0, false},   // (eeData[25] & 0x001F) + 20
-    SingleEepromWord{EepromAddr::alpha_scale1, 5, 5, 0, false},   // (eeData[26] >> 5) + 20
+    SingleEepromWord{EepromAddr::alpha_scale1, 5, 6, 0, false},   // (eeData[26] >> 5) + 20
     SingleEepromWord{EepromAddr::alpha_scale1, 0, 5, 0, false},   // (eeData[26] & 0x001F) + 20
-    SingleEepromWord{EepromAddr::alpha_scale2, 5, 5, 0, false},   // (eeData[27] >> 5) + 20
+    SingleEepromWord{EepromAddr::alpha_scale2, 5, 6, 0, false},   // (eeData[27] >> 5) + 20
     SingleEepromWord{EepromAddr::alpha_scale2, 0, 5, 0, false}    // (eeData[27] & 0x001F) + 20
 };
 
@@ -189,7 +188,9 @@ std::array<float, 192> MLX90641EEpromParser::get_alpha() const
     for (uint8_t i = 0; i < row_max_alpha_norm.size(); ++i) {
         row_max_alpha_norm[i] = static_cast<uint16_t>(extract_param(alpha_max_row[i]));
         row_max_alpha_norm[i] = scale_by_division(row_max_alpha_norm[i],  alpha_max_row[i].scale_exp);
-        row_max_alpha_norm[i] = row_max_alpha_norm[i] / 2047.0f; // Why 2047? Couldn't find in datasheet
+        // Pixel alpha is an unsigned 11-bit normalized value, so its maximum
+        // code is 2^11 - 1 rather than 2^11.
+        row_max_alpha_norm[i] = row_max_alpha_norm[i] / 2047.0f;
     }
 
     // Calculate alpha for each pixel
