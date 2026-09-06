@@ -31,7 +31,8 @@ ArduinoWire wire;                                   ///< The I2C bus.
 I2CAdapter<ArduinoWire> i2c_adapter(wire);          ///< Register-level access over the bus.
 /// The thermal sensor, logging through Serial.
 mlx90641::MLX90641Sensor<I2CAdapter<ArduinoWire>, ArduinoLogger> mlx_sensor(i2c_adapter, config::mlx90641_i2c_addr);
-BluefruitBlePeripheral peripheral;                  ///< The BLE radio.
+/// The BLE radio, its notify queue sized to the active protocol's publish burst.
+BluefruitBlePeripheral peripheral{ble::PeripheralConfig{config::ActiveBleProtocol::notifications_per_publish}};
 /// The wire protocol selected in config.hh, driving the radio.
 config::ActiveBleProtocol ble_protocol(peripheral, config::ble_advertising);
 ArduinoLogger logger;                               ///< Logger for main.cpp's own messages.

@@ -44,6 +44,11 @@ struct CharacteristicProps {
     uint16_t fixed_len = 0;               ///< Fixed value length in bytes; 0 = variable length.
 };
 
+/// @brief Radio bring-up settings, passed to the concrete peripheral at construction.
+struct PeripheralConfig {
+    std::size_t notify_burst = 1;  ///< Back-to-back notify() calls per publish cycle; sizes the TX queue.
+};
+
 /// @brief Radio-level advertising settings, owned by config.hh.
 struct AdvertisingParams {
     int8_t tx_power_dbm;         ///< Transmit power in dBm.

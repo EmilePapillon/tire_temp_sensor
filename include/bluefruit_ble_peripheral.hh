@@ -18,6 +18,12 @@ public:
     static constexpr std::size_t max_services = 2;         ///< Capacity of the service table.
     static constexpr std::size_t max_characteristics = 8;  ///< Capacity of the characteristic table.
 
+    /// @brief Construct the radio glue.
+    /// @param config Radio bring-up settings; see ble::PeripheralConfig. Defaults leave the
+    /// SoftDevice defaults untouched. The composition root fills it (e.g. notify_burst from the
+    /// active protocol's notifications_per_publish).
+    explicit BluefruitBlePeripheral(const ble::PeripheralConfig& config = {});
+
     /// @brief Start the SoftDevice and the Bluefruit stack.
     /// @return False if the stack failed to start.
     bool begin();
@@ -66,6 +72,7 @@ private:
     /// @return The characteristic, or nullptr if not registered.
     BLECharacteristic* find_characteristic(ble::Uuid16 uuid);
 
+    ble::PeripheralConfig config_;                                 ///< Radio bring-up settings, applied in begin().
     BLEService services_[max_services];                            ///< Registered services, in order.
     ble::Uuid16 characteristic_uuids_[max_characteristics] = {};   ///< UUID of each registered characteristic.
     BLECharacteristic characteristics_[max_characteristics];       ///< Registered characteristics, in order.

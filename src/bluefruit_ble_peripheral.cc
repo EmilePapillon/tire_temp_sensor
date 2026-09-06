@@ -1,6 +1,16 @@
 #include "bluefruit_ble_peripheral.hh"
 
+BluefruitBlePeripheral::BluefruitBlePeripheral(const ble::PeripheralConfig& config) : config_(config) {}
+
 bool BluefruitBlePeripheral::begin() {
+    if (config_.notify_burst > 1) {
+        // Queue a whole publish cycle's notifications so notify() does not block
+        // in getHvnPacket() waiting on TX-complete. Widen the connection event to
+        // match so the burst drains without spilling into the next interval.
+        const uint16_t event_len = static_cast<uint16_t>(2 * config_.notify_burst);
+        Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT, event_len, static_cast<uint8_t>(config_.notify_burst),
+                                 BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
+    }
     return Bluefruit.begin();
 }
 
