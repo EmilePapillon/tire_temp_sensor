@@ -36,7 +36,7 @@ pio run -e adafruit_feather_nrf52832 --target upload   # build and flash
 pio device monitor                                     # 115200 baud serial log
 ```
 
-The first log line is `Firmware build <git describe>`, e.g. `v1.2-3-g1387909-dirty`. It is stamped in at build time by `scripts/build_info.py`, which regenerates the git-ignored `include/build_info.hh` before every build; `-dirty` means uncommitted changes were flashed.
+The first log line is `Firmware build <git describe>`, e.g. `v1.2-3-g1387909-dirty`; `-dirty` means uncommitted changes were flashed. The value comes from the git-ignored `include/build_info.hh`, regenerated before every build by `scripts/build_info.py`. That script is a plain CLI with no PlatformIO dependency (`python scripts/build_info.py -o <path>`); PlatformIO merely invokes it through `extra_scripts`, so another build system can call it the same way.
 
 ## Configuration
 
@@ -89,7 +89,7 @@ lib/                       portable C++, built and tested on the host
 include/ + src/            board glue: ArduinoWire, ArduinoLogger, BluefruitBlePeripheral,
                            battery ADC, watchdog, serial frame stream, and main.cpp
 test/                      host unit tests, see test/README.md
-scripts/build_info.py      git revision stamp, run by PlatformIO before each build
+scripts/build_info.py      git revision stamp; standalone CLI, hooked into PlatformIO
 scripts/vizualisation/     live dashboards over serial and BLE, see its README
 docs/Doxyfile              API documentation build and coverage check
 ```
@@ -110,11 +110,14 @@ docs/Doxyfile              API documentation build and coverage check
 
 ```sh
 pio test -e native                                                    # C++ unit tests on the host
+python -m unittest discover -s scripts -p "test_*.py"                 # build stamp script
 python -m unittest discover -s scripts/vizualisation -p "test_*.py"   # visualization tooling
 doxygen docs/Doxyfile                                                 # API docs -> docs/api/html; fails on any undocumented item
 ```
 
-CI (`.github/workflows/build.yaml`) runs the firmware build and all three checks on every push and pull request. The Doxygen run treats warnings as errors, so every function, parameter, template parameter and return value must be documented.
+CI (`.github/workflows/build.yaml`) runs the firmware build and all of these on every push and pull request. The Doxygen run treats warnings as errors, so every function, parameter, template parameter and return value must be documented.
+
+The API reference is published to GitHub Pages from `main` by `.github/workflows/docs.yaml` on every push, so the published docs always match `main`: https://emilepapillon.github.io/tire_temp_sensor/ (one-time setup: repository Settings > Pages > Source = "GitHub Actions").
 
 ## Visualization tooling
 
