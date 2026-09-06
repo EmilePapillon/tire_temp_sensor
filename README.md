@@ -50,6 +50,8 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 | `mlx90641_i2c_addr` | `0x33` | |
 | `mlx90641_refresh_rate` | `Hz8` | Sensor frame rate; `loop()` and the BLE publish rate follow it. `Hz32`/`Hz64` for full-throttle tests |
 | `mlx90641_config` | 400 kHz, 19-bit, `mlx90641_refresh_rate`, 50 000 polls | Bus speed, ADC resolution, frame rate, data-ready poll limit |
+| `mlx90641_use_eeprom_emissivity` | `true` | Use the sensor-stored emissivity; set `false` to use the deployment-calibrated override |
+| `mlx90641_emissivity` | `1.0` | Effective tire-surface emissivity when the EEPROM value is overridden; calibrate this for the tire/finish |
 | `frame_read_max_retries` | 5 | Per `loop()` iteration |
 | `battery_refresh_ms` | 60 000 | How often the LiPo is sampled |
 | `boot_delay_ms` | 5 000 | Grace period to attach a monitor before the radio starts |

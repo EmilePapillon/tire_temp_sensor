@@ -155,7 +155,11 @@ void loop() {
         return;
     }
 
-    mlx_sensor.calculate_temps();
+    if (config::mlx90641_use_eeprom_emissivity) {
+        mlx_sensor.calculate_temps();
+    } else {
+        mlx_sensor.calculate_temps(config::mlx90641_emissivity);
+    }
     const auto temps = mlx_sensor.get_temps();
 
     if (config::stream_frames_over_serial) {

@@ -91,6 +91,18 @@ public:
     /// Uses the EEPROM emissivity and the frame's own ambient as the reflected temperature.
     void calculate_temps();
 
+    /// @brief Compute temperatures with a deployment-specific target emissivity.
+    ///
+    /// The frame's die ambient is still used as the reflected temperature. Use the
+    /// two-argument overload when the reflected temperature must be measured separately.
+    /// @param emissivity Target emissivity, 0 < emissivity <= 1.
+    void calculate_temps(float emissivity);
+
+    /// @brief Compute temperatures with explicit emissivity and reflected temperature.
+    /// @param emissivity Target emissivity, 0 < emissivity <= 1.
+    /// @param reflected_temperature_c Reflected background temperature in degrees Celsius.
+    void calculate_temps(float emissivity, float reflected_temperature_c);
+
     /// @brief Temperatures computed by the last calculate_temps().
     /// @return Per-pixel degrees Celsius, row-major.
     std::array<float, num_pixels> get_temps() const;
