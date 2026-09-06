@@ -28,8 +28,9 @@ public:
 
     // --- scripting -----------------------------------------------------------
     std::map<uint16_t, uint16_t> registers;
-    int read_error = 0;
-    int write_error = 0;
+    I2cStatus read_error = I2cStatus::Success;
+    I2cStatus write_error = I2cStatus::Success;   // returned instead of applying the write
+    I2cStatus write_verdict = I2cStatus::Success;  // returned after applying the write (e.g. VerifyMismatch)
     std::function<void(uint16_t reg, uint16_t value)> on_write;
 
     // --- recording -----------------------------------------------------------
@@ -38,34 +39,34 @@ public:
     std::vector<ReadRecord> reads;
     std::vector<WriteRecord> writes;
 
-    int init(uint32_t freq_khz) {
+    I2cStatus init(uint32_t freq_khz) {
         initialised = true;
         init_freq_khz = freq_khz;
-        return 0;
+        return I2cStatus::Success;
     }
 
-    int read(uint8_t address, uint16_t reg, std::size_t length, uint16_t* buffer) {
+    I2cStatus read(uint8_t address, uint16_t reg, std::size_t length, uint16_t* buffer) {
         reads.push_back({address, reg, length});
-        if (read_error != 0) {
+        if (read_error != I2cStatus::Success) {
             return read_error;
         }
         for (std::size_t i = 0; i < length; i++) {
             const auto it = registers.find(static_cast<uint16_t>(reg + i));
             buffer[i] = (it == registers.end()) ? 0 : it->second;
         }
-        return 0;
+        return I2cStatus::Success;
     }
 
-    int write(uint8_t address, uint16_t reg, uint16_t value) {
+    I2cStatus write(uint8_t address, uint16_t reg, uint16_t value) {
         writes.push_back({address, reg, value});
-        if (write_error != 0) {
+        if (write_error != I2cStatus::Success) {
             return write_error;
         }
         registers[reg] = value;
         if (on_write) {
             on_write(reg, value);
         }
-        return 0;
+        return write_verdict;
     }
 
     /// @brief Serve a decoded EEPROM image as the raw (Hamming-encoded) words the sensor stores.

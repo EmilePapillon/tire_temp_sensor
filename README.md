@@ -15,6 +15,10 @@ This project is firmware for an Adafruit Feather nRF52832 board that reads tire 
 
 Every firmware build logs the git revision it was built from on boot (`Firmware build v1.2-3-g1387909-dirty`). [`scripts/build_info.py`](scripts/build_info.py) runs before each build and regenerates `include/build_info.hh` from the working tree, so nothing has to be updated by hand; `-dirty` means uncommitted changes were flashed. The header is git-ignored.
 
+## Runtime supervision
+
+The nRF52 hardware watchdog is armed first thing in `setup()` and fed once per `loop()` iteration (and per frame-read attempt, since a read can take seconds to time out). Anything that stalls longer than `config::watchdog_timeout_s`, including a fatal init error, ends in a reset rather than a hung board. The boot log's `Firmware build` line tells you which revision came back up.
+
 ## Configuration
 
 Every per-board / per-deployment tunable lives in [`include/config.hh`](include/config.hh): wheel corner, log level, MLX90641 I²C address / bus speed / resolution / refresh rate, battery refresh interval, BLE TX power and advertising intervals, and the active BLE protocol (`config::ActiveBleProtocol`). Modules carry no hidden defaults of their own.
@@ -32,10 +36,10 @@ The litmus test for where a file lives: **does it need `Arduino.h` / `Bluefruit.
 lib/
   logger/         LogLevel, the "Logger" shape, NullLogger
   i2c_adapter/    the "Wire" shape, I2CAdapter<WireT> (register-level I²C)
-  mlx90641/       MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config
+  mlx90641/       MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config + Status
   ble_protocol/   the "BlePeripheral" shape, TireTelemetry/DeviceIdentity, RejsaBleProtocol<PeripheralT>
   battery/        LiPo voltage -> percent curve
-include/          config.hh, ArduinoWire, ArduinoLogger, BluefruitBlePeripheral, battery ADC glue
+include/          config.hh, ArduinoWire, ArduinoLogger, BluefruitBlePeripheral, battery ADC, watchdog, serial frame stream
 src/              main.cpp (composition root) + the include/ definitions
 test/             host unit tests: test_*/ per suite, mocks/ and fixtures/ shared by include
 scripts/vizualisation/   live dashboards over serial and BLE (see its README)

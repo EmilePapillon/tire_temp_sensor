@@ -1,7 +1,9 @@
 #include <unity.h>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include "fixtures/mlx90641_eeprom_fixture.hh"
+#include "fixtures/mlx90641_frame_fixture.hh"
 #include "mlx90641_driver.hh"
 #include "mocks/mock_i2c_adapter.hh"
 
@@ -14,8 +16,9 @@ constexpr uint16_t control_reg = 0x800D;
 constexpr uint16_t control_reg_initial = 0x0901;  // resolution 2, refresh 2, plus unrelated bits
 constexpr uint16_t status_data_ready = 0x0008;
 constexpr uint16_t status_clear_ready = 0x0030;
+constexpr uint32_t test_max_polls = 1000;
 
-const Mlx90641Config test_config{400, Resolution::Bits19, RefreshRate::Hz32};
+const Mlx90641Config test_config{400, Resolution::Bits19, RefreshRate::Hz32, test_max_polls};
 
 MockI2CAdapter* bus = nullptr;
 Sensor* sensor = nullptr;
@@ -35,25 +38,41 @@ void tearDown(void) {
     bus = nullptr;
 }
 
+void assert_status(Status expected, Status actual) {
+    TEST_ASSERT_EQUAL_STRING(status_name(expected), status_name(actual));
+}
+
 uint16_t resolution_bits(uint16_t control) { return (control >> 10) & 0x03; }
 uint16_t refresh_bits(uint16_t control) { return (control >> 7) & 0x07; }
 
-// Emulate the sensor: writing 0x0030 to the status register clears "new data".
-void arm_status_register() {
-    bus->on_write = [](uint16_t reg, uint16_t value) {
+// Emulate the sensor: acknowledging the status register clears "new data" and
+// leaves the sub-page bit in place.
+void arm_status_register(uint8_t sub_page) {
+    bus->registers[status_reg] = status_data_ready | sub_page;
+    bus->on_write = [sub_page](uint16_t reg, uint16_t value) {
         if (reg == status_reg && value == status_clear_ready) {
-            bus->registers[status_reg] = 0x0000;
+            bus->registers[status_reg] = sub_page;
         }
     };
 }
 
+void prime_frame(uint8_t sub_page) {
+    assert_status(Status::Success, sensor->init(test_config));
+    arm_status_register(sub_page);
+    load_frame(bus->registers, sub_page);
+    bus->reads.clear();
+    bus->writes.clear();
+}
+
+// ---------------------------------------------------------------- init()
+
 void test_init_succeeds_with_valid_eeprom() {
-    TEST_ASSERT_TRUE(sensor->init(test_config));
+    assert_status(Status::Success, sensor->init(test_config));
     TEST_ASSERT_TRUE(bus->initialised);
 }
 
 void test_init_applies_config_to_bus_and_control_register() {
-    TEST_ASSERT_TRUE(sensor->init(test_config));
+    assert_status(Status::Success, sensor->init(test_config));
 
     TEST_ASSERT_EQUAL_UINT32(400u, bus->init_freq_khz);
     const uint16_t control = bus->registers[control_reg];
@@ -64,8 +83,8 @@ void test_init_applies_config_to_bus_and_control_register() {
 }
 
 void test_init_has_no_hidden_defaults() {
-    const Mlx90641Config other{100, Resolution::Bits16, RefreshRate::Hz1};
-    TEST_ASSERT_TRUE(sensor->init(other));
+    const Mlx90641Config other{100, Resolution::Bits16, RefreshRate::Hz1, test_max_polls};
+    assert_status(Status::Success, sensor->init(other));
 
     TEST_ASSERT_EQUAL_UINT32(100u, bus->init_freq_khz);
     const uint16_t control = bus->registers[control_reg];
@@ -73,29 +92,33 @@ void test_init_has_no_hidden_defaults() {
     TEST_ASSERT_EQUAL_HEX16(0x01, refresh_bits(control));
 }
 
-void test_init_fails_on_bus_error() {
-    bus->read_error = -1;
-    TEST_ASSERT_FALSE(sensor->init(test_config));
+void test_init_reports_bus_error() {
+    bus->read_error = I2cStatus::Nack;
+    assert_status(Status::I2cNack, sensor->init(test_config));
     TEST_ASSERT_EQUAL_size_t(0, bus->writes.size());
 }
 
-void test_init_fails_when_eeprom_is_not_an_mlx90641() {
+void test_init_rejects_a_device_that_is_not_an_mlx90641() {
     bus->registers[eeprom_start_address + 10] &= static_cast<uint16_t>(~0x0040);  // device-select bit
-    TEST_ASSERT_FALSE(sensor->init(test_config));
+    assert_status(Status::NotAnMlx90641, sensor->init(test_config));
 }
 
-void test_init_fails_on_uncorrectable_eeprom_corruption() {
+void test_init_rejects_uncorrectable_eeprom_corruption() {
     bus->registers[eeprom_start_address + 100] ^= 0x0003;  // two flipped bits
-    TEST_ASSERT_FALSE(sensor->init(test_config));
+    assert_status(Status::EepromCorrupt, sensor->init(test_config));
 }
+
+void test_init_tolerates_a_correctable_eeprom_bit_flip() {
+    bus->registers[eeprom_start_address + 100] ^= 0x0001;  // single flipped bit, Hamming-correctable
+    assert_status(Status::Success, sensor->init(test_config));
+}
+
+// ---------------------------------------------------------------- read_frame()
 
 void test_read_frame_follows_the_status_register_handshake() {
-    TEST_ASSERT_TRUE(sensor->init(test_config));
-    arm_status_register();
-    bus->reads.clear();
-    bus->writes.clear();
+    prime_frame(0);
 
-    TEST_ASSERT_TRUE(sensor->read_frame());
+    assert_status(Status::Success, sensor->read_frame());
 
     TEST_ASSERT_TRUE(bus->was_written(status_reg, status_clear_ready));
     // Sub-page 0 pixel banks, then the aux data block, then control register 1.
@@ -108,22 +131,92 @@ void test_read_frame_follows_the_status_register_handshake() {
     TEST_ASSERT_FALSE(bus->was_read(0x0420));
 }
 
+void test_read_frame_accepts_sub_page_1() {
+    prime_frame(1);
+
+    assert_status(Status::Success, sensor->read_frame());
+
+    for (uint16_t bank : {0x0420, 0x0460, 0x04A0, 0x04E0, 0x0520, 0x0560}) {
+        TEST_ASSERT_TRUE_MESSAGE(bus->was_read(bank), "sub-page 1 pixel bank not read");
+    }
+    TEST_ASSERT_FALSE(bus->was_read(0x0400));
+}
+
+void test_read_frame_tolerates_status_register_readback_mismatch() {
+    // The real status register self-clears, so the adapter's write verification
+    // reports a mismatch. That must not abort the frame.
+    prime_frame(0);
+    bus->write_verdict = I2cStatus::VerifyMismatch;
+
+    assert_status(Status::Success, sensor->read_frame());
+    TEST_ASSERT_TRUE(bus->was_written(status_reg, status_clear_ready));
+}
+
+void test_read_frame_times_out_when_no_frame_ever_arrives() {
+    assert_status(Status::Success, sensor->init(test_config));
+    bus->registers[status_reg] = 0;  // never ready
+    bus->reads.clear();
+
+    assert_status(Status::DataReadyTimeout, sensor->read_frame());
+    TEST_ASSERT_EQUAL_size_t(test_max_polls, bus->reads.size());
+}
+
 void test_read_frame_fails_when_new_data_flag_never_clears() {
-    TEST_ASSERT_TRUE(sensor->init(test_config));
+    assert_status(Status::Success, sensor->init(test_config));
     // A device that keeps re-asserting "new data" no matter how often it is acknowledged.
     bus->on_write = [](uint16_t reg, uint16_t) {
         if (reg == status_reg) {
             bus->registers[status_reg] = status_data_ready;
         }
     };
-    TEST_ASSERT_FALSE(sensor->read_frame());
+    assert_status(Status::FrameSyncFailed, sensor->read_frame());
 }
 
-void test_read_frame_fails_on_bus_error() {
-    TEST_ASSERT_TRUE(sensor->init(test_config));
-    bus->read_error = -1;
-    TEST_ASSERT_FALSE(sensor->read_frame());
+void test_read_frame_reports_bus_error() {
+    assert_status(Status::Success, sensor->init(test_config));
+    bus->read_error = I2cStatus::Nack;
+    assert_status(Status::I2cNack, sensor->read_frame());
 }
+
+// ---------------------------------------------------------------- calculate_temps()
+
+void test_calculate_temps_reproduces_reference_frame() {
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+
+    sensor->calculate_temps();
+    const auto temps = sensor->get_temps();
+
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, expected_frame_ambient_c, sensor->get_ambient());
+    for (const auto& expected : expected_frame_pixels) {
+        TEST_ASSERT_FLOAT_WITHIN(0.01f, expected.temp_c, temps[expected.index]);
+    }
+    for (float t : temps) {
+        TEST_ASSERT_TRUE(std::isfinite(t));
+        TEST_ASSERT_TRUE(t >= expected_frame_min_c - 0.01f);
+        TEST_ASSERT_TRUE(t <= expected_frame_max_c + 0.01f);
+    }
+}
+
+void test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0() {
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto temps_sub_page_0 = sensor->get_temps();
+
+    prime_frame(1);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto temps_sub_page_1 = sensor->get_temps();
+
+    // Same raw pixels, second offset calibration set: expect sub-degree agreement.
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, expected_frame_ambient_c, sensor->get_ambient());
+    for (std::size_t i = 0; i < num_pixels; i++) {
+        TEST_ASSERT_FLOAT_WITHIN(0.5f, temps_sub_page_0[i], temps_sub_page_1[i]);
+    }
+}
+
+// ---------------------------------------------------------------- helpers
 
 void test_column_averages_average_each_column_over_all_rows() {
     std::array<float, num_pixels> temps{};
@@ -155,12 +248,18 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_succeeds_with_valid_eeprom);
     RUN_TEST(test_init_applies_config_to_bus_and_control_register);
     RUN_TEST(test_init_has_no_hidden_defaults);
-    RUN_TEST(test_init_fails_on_bus_error);
-    RUN_TEST(test_init_fails_when_eeprom_is_not_an_mlx90641);
-    RUN_TEST(test_init_fails_on_uncorrectable_eeprom_corruption);
+    RUN_TEST(test_init_reports_bus_error);
+    RUN_TEST(test_init_rejects_a_device_that_is_not_an_mlx90641);
+    RUN_TEST(test_init_rejects_uncorrectable_eeprom_corruption);
+    RUN_TEST(test_init_tolerates_a_correctable_eeprom_bit_flip);
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
+    RUN_TEST(test_read_frame_accepts_sub_page_1);
+    RUN_TEST(test_read_frame_tolerates_status_register_readback_mismatch);
+    RUN_TEST(test_read_frame_times_out_when_no_frame_ever_arrives);
     RUN_TEST(test_read_frame_fails_when_new_data_flag_never_clears);
-    RUN_TEST(test_read_frame_fails_on_bus_error);
+    RUN_TEST(test_read_frame_reports_bus_error);
+    RUN_TEST(test_calculate_temps_reproduces_reference_frame);
+    RUN_TEST(test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();

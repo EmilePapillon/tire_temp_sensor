@@ -12,14 +12,15 @@
 //     file in the repo that touches Bluefruit.
 //   - MockBlePeripheral (test/mocks/mock_ble_peripheral.hh), records calls.
 //
-// Required members:
+// Required members (the bool-returning ones must return exactly bool, so a
+// failed registration can never be silently ignored):
 //     bool begin();                                       // bring up the radio
 //     void set_device_name(const char* name);
-//     void add_service(Uuid16 uuid);
-//     void add_characteristic(Uuid16 uuid, const CharacteristicProps& props);
+//     bool add_service(Uuid16 uuid);
+//     bool add_characteristic(Uuid16 uuid, const CharacteristicProps& props);
 //         // attaches to the most recently added service
 //     bool notify(Uuid16 characteristic, const uint8_t* data, std::size_t len);
-//     void start_advertising(const AdvertisingParams& params);
+//     bool start_advertising(const AdvertisingParams& params);
 //         // advertises flags, TX power, the device name and every added service
 //     bool is_connected();
 //     void poll();                                        // service the radio; no-op if event driven
@@ -46,20 +47,25 @@ struct AdvertisingParams {
     bool restart_on_disconnect;
 };
 
+namespace detail {
+template <typename Expr>
+using returns_bool = std::enable_if_t<std::is_same<Expr, bool>::value>;
+}
+
 template <typename T, typename = void>
 struct is_ble_peripheral : std::false_type {};
 
 template <typename T>
 struct is_ble_peripheral<T, std::void_t<
-    decltype(std::declval<T&>().begin()),
+    detail::returns_bool<decltype(std::declval<T&>().begin())>,
     decltype(std::declval<T&>().set_device_name(std::declval<const char*>())),
-    decltype(std::declval<T&>().add_service(std::declval<Uuid16>())),
-    decltype(std::declval<T&>().add_characteristic(std::declval<Uuid16>(),
-                                                   std::declval<const CharacteristicProps&>())),
-    decltype(std::declval<T&>().notify(std::declval<Uuid16>(), std::declval<const uint8_t*>(),
-                                       std::declval<std::size_t>())),
-    decltype(std::declval<T&>().start_advertising(std::declval<const AdvertisingParams&>())),
-    decltype(std::declval<T&>().is_connected()),
+    detail::returns_bool<decltype(std::declval<T&>().add_service(std::declval<Uuid16>()))>,
+    detail::returns_bool<decltype(std::declval<T&>().add_characteristic(
+        std::declval<Uuid16>(), std::declval<const CharacteristicProps&>()))>,
+    detail::returns_bool<decltype(std::declval<T&>().notify(
+        std::declval<Uuid16>(), std::declval<const uint8_t*>(), std::declval<std::size_t>()))>,
+    detail::returns_bool<decltype(std::declval<T&>().start_advertising(std::declval<const AdvertisingParams&>()))>,
+    detail::returns_bool<decltype(std::declval<T&>().is_connected())>,
     decltype(std::declval<T&>().poll())
 >> : std::true_type {};
 

@@ -23,6 +23,9 @@ public:
     // --- scripting -----------------------------------------------------------
     bool connected = false;
     bool notify_result = true;
+    bool add_service_result = true;
+    bool add_characteristic_result = true;
+    bool start_advertising_result = true;
 
     // --- recording -----------------------------------------------------------
     bool begun = false;
@@ -41,11 +44,15 @@ public:
 
     void set_device_name(const char* name) { device_name = name; }
 
-    void add_service(ble::Uuid16 uuid) { services.push_back(uuid); }
+    bool add_service(ble::Uuid16 uuid) {
+        services.push_back(uuid);
+        return add_service_result;
+    }
 
-    void add_characteristic(ble::Uuid16 uuid, const ble::CharacteristicProps& props) {
+    bool add_characteristic(ble::Uuid16 uuid, const ble::CharacteristicProps& props) {
         const ble::Uuid16 service = services.empty() ? 0 : services.back();
         characteristics.push_back({service, uuid, props});
+        return add_characteristic_result;
     }
 
     bool notify(ble::Uuid16 characteristic, const uint8_t* data, std::size_t len) {
@@ -53,9 +60,10 @@ public:
         return notify_result;
     }
 
-    void start_advertising(const ble::AdvertisingParams& params) {
+    bool start_advertising(const ble::AdvertisingParams& params) {
         advertising = true;
         advertising_params = params;
+        return start_advertising_result;
     }
 
     bool is_connected() { return connected; }

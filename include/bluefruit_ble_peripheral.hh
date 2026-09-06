@@ -18,10 +18,12 @@ public:
 
     bool begin();
     void set_device_name(const char* name);
-    void add_service(ble::Uuid16 uuid);
-    void add_characteristic(ble::Uuid16 uuid, const ble::CharacteristicProps& props);
+    /// @brief False if the service table is full or the SoftDevice rejected it.
+    bool add_service(ble::Uuid16 uuid);
+    /// @brief False if the characteristic table is full, no service was added, or the SoftDevice rejected it.
+    bool add_characteristic(ble::Uuid16 uuid, const ble::CharacteristicProps& props);
     bool notify(ble::Uuid16 characteristic, const uint8_t* data, std::size_t len);
-    void start_advertising(const ble::AdvertisingParams& params);
+    bool start_advertising(const ble::AdvertisingParams& params);
     bool is_connected();
     void poll();
 

@@ -21,8 +21,12 @@ void tearDown(void) {
     wire = nullptr;
 }
 
+void assert_status(I2cStatus expected, I2cStatus actual) {
+    TEST_ASSERT_EQUAL_STRING(i2c_status_name(expected), i2c_status_name(actual));
+}
+
 void test_init_starts_bus_at_requested_frequency() {
-    TEST_ASSERT_EQUAL_INT(0, adapter->init(400));
+    assert_status(I2cStatus::Success, adapter->init(400));
     TEST_ASSERT_TRUE(wire->begun);
     TEST_ASSERT_EQUAL_UINT32(400000u, wire->clock_hz);
 }
@@ -31,7 +35,7 @@ void test_read_single_word_selects_register_and_assembles_big_endian() {
     wire->registers[0x800D] = 0x1234;
     uint16_t word = 0;
 
-    TEST_ASSERT_EQUAL_INT(0, adapter->read(device_addr, 0x800D, 1, &word));
+    assert_status(I2cStatus::Success, adapter->read(device_addr, 0x800D, 1, &word));
 
     TEST_ASSERT_EQUAL_HEX16(0x1234, word);
     TEST_ASSERT_EQUAL_size_t(1, wire->transactions.size());
@@ -48,7 +52,7 @@ void test_read_splits_long_reads_into_32_byte_chunks() {
     }
     uint16_t buffer[words] = {};
 
-    TEST_ASSERT_EQUAL_INT(0, adapter->read(device_addr, 0x2400, words, buffer));
+    assert_status(I2cStatus::Success, adapter->read(device_addr, 0x2400, words, buffer));
 
     TEST_ASSERT_EQUAL_size_t(3, wire->request_sizes.size());
     TEST_ASSERT_EQUAL_size_t(32, wire->request_sizes[0]);
@@ -69,30 +73,32 @@ void test_read_splits_long_reads_into_32_byte_chunks() {
     }
 }
 
-void test_read_reports_nack_as_minus_one() {
+void test_read_reports_nack() {
     uint16_t word = 0;
     wire->end_transmission_status = 2;  // address NACK
-    TEST_ASSERT_EQUAL_INT(-1, adapter->read(device_addr, 0x800D, 1, &word));
+    assert_status(I2cStatus::Nack, adapter->read(device_addr, 0x800D, 1, &word));
     wire->end_transmission_status = 3;  // data NACK
-    TEST_ASSERT_EQUAL_INT(-1, adapter->read(device_addr, 0x800D, 1, &word));
+    assert_status(I2cStatus::Nack, adapter->read(device_addr, 0x800D, 1, &word));
 }
 
-void test_read_reports_bus_error_as_minus_two() {
+void test_read_reports_bus_error() {
     uint16_t word = 0;
     wire->end_transmission_status = 1;  // tx buffer overflow
-    TEST_ASSERT_EQUAL_INT(-2, adapter->read(device_addr, 0x800D, 1, &word));
+    assert_status(I2cStatus::BusError, adapter->read(device_addr, 0x800D, 1, &word));
     wire->end_transmission_status = 4;  // other error
-    TEST_ASSERT_EQUAL_INT(-2, adapter->read(device_addr, 0x800D, 1, &word));
+    assert_status(I2cStatus::BusError, adapter->read(device_addr, 0x800D, 1, &word));
+    wire->end_transmission_status = 5;  // timeout
+    assert_status(I2cStatus::BusError, adapter->read(device_addr, 0x800D, 1, &word));
 }
 
-void test_read_reports_no_data_as_minus_one() {
+void test_read_reports_no_data() {
     uint16_t word = 0;
     wire->fail_request = true;
-    TEST_ASSERT_EQUAL_INT(-1, adapter->read(device_addr, 0x800D, 1, &word));
+    assert_status(I2cStatus::NoData, adapter->read(device_addr, 0x800D, 1, &word));
 }
 
 void test_write_sends_register_and_value_then_verifies() {
-    TEST_ASSERT_EQUAL_INT(0, adapter->write(device_addr, 0x800D, 0xBEEF));
+    assert_status(I2cStatus::Success, adapter->write(device_addr, 0x800D, 0xBEEF));
 
     TEST_ASSERT_EQUAL_HEX16(0xBEEF, wire->registers[0x800D]);
     const std::vector<uint8_t> expected = {0x80, 0x0D, 0xBE, 0xEF};
@@ -103,14 +109,14 @@ void test_write_sends_register_and_value_then_verifies() {
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected.data(), wire->transactions[1].data(), 2);
 }
 
-void test_write_reports_readback_mismatch_as_minus_two() {
+void test_write_reports_readback_mismatch() {
     wire->write_mask = 0x00FF;  // device silently drops the high byte
-    TEST_ASSERT_EQUAL_INT(-2, adapter->write(device_addr, 0x800D, 0xBEEF));
+    assert_status(I2cStatus::VerifyMismatch, adapter->write(device_addr, 0x800D, 0xBEEF));
 }
 
-void test_write_reports_readback_failure_as_minus_one() {
+void test_write_reports_readback_failure() {
     wire->fail_request = true;
-    TEST_ASSERT_EQUAL_INT(-1, adapter->write(device_addr, 0x800D, 0xBEEF));
+    assert_status(I2cStatus::NoData, adapter->write(device_addr, 0x800D, 0xBEEF));
 }
 
 int main(int argc, char** argv) {
@@ -118,11 +124,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_starts_bus_at_requested_frequency);
     RUN_TEST(test_read_single_word_selects_register_and_assembles_big_endian);
     RUN_TEST(test_read_splits_long_reads_into_32_byte_chunks);
-    RUN_TEST(test_read_reports_nack_as_minus_one);
-    RUN_TEST(test_read_reports_bus_error_as_minus_two);
-    RUN_TEST(test_read_reports_no_data_as_minus_one);
+    RUN_TEST(test_read_reports_nack);
+    RUN_TEST(test_read_reports_bus_error);
+    RUN_TEST(test_read_reports_no_data);
     RUN_TEST(test_write_sends_register_and_value_then_verifies);
-    RUN_TEST(test_write_reports_readback_mismatch_as_minus_two);
-    RUN_TEST(test_write_reports_readback_failure_as_minus_one);
+    RUN_TEST(test_write_reports_readback_mismatch);
+    RUN_TEST(test_write_reports_readback_failure);
     return UNITY_END();
 }

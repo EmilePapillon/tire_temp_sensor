@@ -19,7 +19,7 @@
 // wheel: "RejsaRubber" + corner (FL/FR/RL/RR) + the last three MAC bytes as hex.
 //
 // "BleTireProtocol" shape (what main.cpp drives, shared with future protocols):
-//     void begin(const DeviceIdentity& identity);  // name + GATT + advertising
+//     bool begin(const DeviceIdentity& identity);  // name + GATT + advertising; false if registration failed
 //     bool is_ready();                             // a consumer can receive data
 //     bool publish(const TireTelemetry& telemetry);
 //     void poll();                                 // per-loop housekeeping
@@ -47,7 +47,7 @@ public:
         device_name_[0] = '\0';
     }
 
-    void begin(const DeviceIdentity& identity) {
+    bool begin(const DeviceIdentity& identity) {
         build_device_name(identity, device_name_);
         peripheral_.set_device_name(device_name_);
 
@@ -56,12 +56,15 @@ public:
         props.notify = true;
         props.fixed_len = packet_size;
 
-        peripheral_.add_service(service_uuid);
-        peripheral_.add_characteristic(char_one_uuid, props);
-        peripheral_.add_characteristic(char_two_uuid, props);
-        peripheral_.add_characteristic(char_thr_uuid, props);
-
-        peripheral_.start_advertising(advertising_);
+        if (!peripheral_.add_service(service_uuid)) {
+            return false;
+        }
+        for (ble::Uuid16 uuid : {char_one_uuid, char_two_uuid, char_thr_uuid}) {
+            if (!peripheral_.add_characteristic(uuid, props)) {
+                return false;
+            }
+        }
+        return peripheral_.start_advertising(advertising_);
     }
 
     bool is_ready() {

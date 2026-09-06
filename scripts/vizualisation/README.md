@@ -18,6 +18,8 @@ Two standalone scripts for visualizing MLX90641 thermal data in real time, one r
 
 Reads raw 12x16 float32 frames from a serial connection and displays two live heatmaps side by side: the full 12x16 thermal image and a column-averaged strip.
 
+The firmware shares the port with its text logs, so each frame is prefixed with the 4-byte magic `AA 55 54 54` (`include/serial_frame_stream.hh`) followed by 192 little-endian float32 values in row-major order. The script synchronises on the magic and drops any frame whose values fall outside a sanity range.
+
 Pass your device's serial port with `-p`/`--port` (e.g. `/dev/cu.usbserial-XXXXXXXX` on macOS, `COM3` on Windows). If omitted, it falls back to a default port defined in the script.
 
 ```bash

@@ -1,10 +1,8 @@
 #pragma once
 #include <cstdint>
-#include "bluefruit_ble_peripheral.hh"
 #include "i_ble_peripheral.hh"
 #include "logger.hh"
-#include "mlx90641_driver.hh"
-#include "rejsa_ble_protocol.hh"
+#include "mlx90641_config.hh"
 #include "tire_telemetry.hh"
 
 // Every tunable a firmware builder adjusts per board / deployment lives here.
@@ -12,6 +10,15 @@
 //
 // Values are compile-time constants read directly wherever they are needed;
 // nothing here is threaded through constructors.
+//
+// This header stays light on purpose (no Arduino / Bluefruit includes) so that
+// board glue such as ArduinoLogger can read a constant without dragging in the
+// BLE stack. The protocol alias below only needs forward declarations; main.cpp
+// includes the full definitions.
+
+template <typename PeripheralT>
+class RejsaBleProtocol;
+class BluefruitBlePeripheral;
 
 namespace config {
 
@@ -32,15 +39,19 @@ constexpr mlx90641::Mlx90641Config mlx90641_config{
     400,                           // I2C bus frequency, kHz
     mlx90641::Resolution::Bits19,  // ADC resolution
     mlx90641::RefreshRate::Hz32,   // frame rate
+    50000,                         // status-register polls before a frame read gives up (~5 s at 400 kHz)
 };
 constexpr uint8_t frame_read_max_retries = 5;
 
 // --- Battery -----------------------------------------------------------------
 constexpr uint32_t battery_refresh_ms = 60000;  // how often to re-read the LiPo
 
-// --- Startup -----------------------------------------------------------------
+// --- Startup / supervision ---------------------------------------------------
 // Grace period before the radio starts, leaves time to attach a serial monitor.
 constexpr uint32_t boot_delay_ms = 5000;
+// Hardware watchdog: the board resets if loop() stalls for longer than this.
+// Must exceed boot_delay_ms and one full frame read (see data_ready_max_polls).
+constexpr uint32_t watchdog_timeout_s = 8;
 
 // --- BLE radio ---------------------------------------------------------------
 constexpr ble::AdvertisingParams ble_advertising{

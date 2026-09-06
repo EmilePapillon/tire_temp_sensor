@@ -6,10 +6,14 @@
 #include "arduino_logger.hh"
 #include "arduino_wire.hh"
 #include "battery.hh"
+#include "bluefruit_ble_peripheral.hh"
 #include "config.hh"
 #include "i2c_adapter.hh"
 #include "mlx90641_driver.hh"
+#include "rejsa_ble_protocol.hh"
+#include "serial_frame_stream.hh"
 #include "tire_telemetry.hh"
+#include "watchdog.hh"
 
 // Git revision stamped in by scripts/build_info.py (extra_scripts in platformio.ini).
 #if __has_include("build_info.hh")
@@ -29,33 +33,41 @@ ArduinoLogger logger;
 TireTelemetry telemetry{};
 
 // Refresh the battery fields of `telemetry` from the ADC. Reads once on the
-// first call, then at most every config::battery_refresh_ms.
+// first call, then at most every config::battery_refresh_ms. Unsigned
+// subtraction keeps this correct across the 49-day millis() wraparound.
 void refresh_battery() {
-    static uint32_t next_read_ms = 0;
+    static bool read_once = false;
+    static uint32_t last_read_ms = 0;
     const uint32_t now = millis();
-    if (now < next_read_ms) {
+    if (read_once && (now - last_read_ms) < config::battery_refresh_ms) {
         return;
     }
-    next_read_ms = now + config::battery_refresh_ms;
+    read_once = true;
+    last_read_ms = now;
     telemetry.battery_mv = battery_read_millivolts();
     telemetry.battery_pct = battery_lipo_percent(telemetry.battery_mv);
 }
 
 bool read_frame_with_retries() {
     for (uint8_t attempt = 1; attempt <= config::frame_read_max_retries; attempt++) {
-        if (mlx_sensor.read_frame()) {
+        watchdog_feed();  // a frame read may legitimately take several seconds to time out
+        const mlx90641::Status status = mlx_sensor.read_frame();
+        if (status == mlx90641::Status::Success) {
             return true;
         }
-        char msg[48];
-        snprintf(msg, sizeof(msg), "Frame read failed, retry %u/%u", attempt, config::frame_read_max_retries);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Frame read failed (%s), retry %u/%u", mlx90641::status_name(status), attempt,
+                 config::frame_read_max_retries);
         logger.log(LogLevel::DEBUG, msg);
         delay(1);
     }
     return false;
 }
 
+// Log the reason and stop feeding the watchdog: the board resets itself.
 void halt(const char* reason) {
     logger.log(LogLevel::ERROR, reason);
+    logger.log(LogLevel::ERROR, "Halting; the watchdog will reset the board.");
     while (true) {
         delay(1000);
     }
@@ -64,20 +76,27 @@ void halt(const char* reason) {
 }  // namespace
 
 void setup() {
+    watchdog_begin(config::watchdog_timeout_s);
+
     Serial.begin(config::serial_baud);
     logger.log(LogLevel::INFO, "Firmware build " BUILD_VERSION);
     logger.log(LogLevel::INFO, "Starting setup...");
 
     logger.log(LogLevel::INFO, "Initializing MLX90641 sensor...");
-    if (!mlx_sensor.init(config::mlx90641_config)) {
-        halt("Failed to initialize MLX90641!");
+    const mlx90641::Status sensor_status = mlx_sensor.init(config::mlx90641_config);
+    if (sensor_status != mlx90641::Status::Success) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to initialize MLX90641: %s", mlx90641::status_name(sensor_status));
+        halt(msg);
     }
     logger.log(LogLevel::INFO, "MLX90641 initialized successfully");
 
     battery_begin();
     refresh_battery();
 
+    watchdog_feed();
     delay(config::boot_delay_ms);
+    watchdog_feed();
 
     logger.log(LogLevel::INFO, "Starting Bluetooth...");
     if (!peripheral.begin()) {
@@ -92,12 +111,16 @@ void setup() {
         logger.log(LogLevel::INFO, msg);
     }
 
-    ble_protocol.begin(identity);
+    if (!ble_protocol.begin(identity)) {
+        halt("Failed to register the BLE GATT services!");
+    }
     logger.log(LogLevel::INFO, ble_protocol.device_name());
     logger.log(LogLevel::INFO, "Setup complete - Running!");
 }
 
 void loop() {
+    watchdog_feed();
+
     logger.log(LogLevel::DEBUG, "Attempting to read frame...");
     if (!read_frame_with_retries()) {
         logger.log(LogLevel::ERROR, "Missed frame, all retries failed. Skipping notification.");
@@ -108,7 +131,7 @@ void loop() {
     const auto temps = mlx_sensor.get_temps();
 
     if (config::stream_frames_over_serial) {
-        Serial.write(reinterpret_cast<const uint8_t*>(temps.data()), temps.size() * sizeof(float));
+        serial_stream_frame(temps);
     }
 
     telemetry.column_temps_c = mlx90641::column_averages(temps);

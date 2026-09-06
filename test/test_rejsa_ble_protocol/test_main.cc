@@ -47,7 +47,7 @@ TireTelemetry sample_telemetry() {
 }
 
 void test_begin_registers_rejsa_gatt_layout() {
-    protocol->begin(test_identity);
+    TEST_ASSERT_TRUE(protocol->begin(test_identity));
 
     TEST_ASSERT_EQUAL_size_t(1, peripheral->services.size());
     TEST_ASSERT_EQUAL_HEX16(0x1ff7, peripheral->services[0]);
@@ -180,6 +180,23 @@ void test_publish_reports_notify_failure() {
     TEST_ASSERT_FALSE(protocol->publish(sample_telemetry()));
 }
 
+void test_begin_fails_when_service_registration_fails() {
+    peripheral->add_service_result = false;
+    TEST_ASSERT_FALSE(protocol->begin(test_identity));
+    TEST_ASSERT_FALSE(peripheral->advertising);
+}
+
+void test_begin_fails_when_characteristic_registration_fails() {
+    peripheral->add_characteristic_result = false;
+    TEST_ASSERT_FALSE(protocol->begin(test_identity));
+    TEST_ASSERT_FALSE(peripheral->advertising);
+}
+
+void test_begin_fails_when_advertising_fails() {
+    peripheral->start_advertising_result = false;
+    TEST_ASSERT_FALSE(protocol->begin(test_identity));
+}
+
 void test_poll_forwards_to_peripheral() {
     protocol->poll();
     TEST_ASSERT_EQUAL_INT(1, peripheral->poll_count);
@@ -196,6 +213,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_publish_frames_three_20_byte_packets);
     RUN_TEST(test_publish_pair_max_picks_the_hotter_column);
     RUN_TEST(test_publish_reports_notify_failure);
+    RUN_TEST(test_begin_fails_when_service_registration_fails);
+    RUN_TEST(test_begin_fails_when_characteristic_registration_fails);
+    RUN_TEST(test_begin_fails_when_advertising_fails);
     RUN_TEST(test_poll_forwards_to_peripheral);
     return UNITY_END();
 }

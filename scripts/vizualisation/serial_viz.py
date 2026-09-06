@@ -9,7 +9,10 @@ DEFAULT_COM_PORT = "/dev/cu.usbserial-0247185B"
 BAUDRATE = 115200
 ROWS, COLS = 12, 16
 BYTES_PER_FRAME = ROWS * COLS * 4  # 192 floats * 4 bytes
-MIN_TEMP = -40.0   # validation range
+# Every frame is prefixed with this magic (see include/serial_frame_stream.hh);
+# text logs share the port, so we synchronise on it rather than on content.
+FRAME_MAGIC = b"\xaa\x55TT"
+MIN_TEMP = -40.0   # sanity range for a decoded frame
 MAX_TEMP = 150.0
 VMIN, VMAX = 20, 40  # fixed color scale, degrees Celsius (matches ble.py)
 # --------------------------
@@ -74,55 +77,53 @@ try:
         else:
             time.sleep(0.001)
 
-        # try to find one or more aligned valid frames in buffer
-        offset = 0
-        buf_len = len(buf)
-        while buf_len - offset >= BYTES_PER_FRAME:
-            candidate = buf[offset: offset + BYTES_PER_FRAME]
-            arr = np.frombuffer(bytes(candidate), dtype='<f4')
-            if arr.size != ROWS * COLS:
-                offset += 1
+        # consume every complete magic-prefixed frame in the buffer
+        while True:
+            start = buf.find(FRAME_MAGIC)
+            if start < 0:
+                # keep a partial magic that may straddle the next chunk
+                del buf[:max(0, len(buf) - (len(FRAME_MAGIC) - 1))]
+                break
+            if len(buf) - start < len(FRAME_MAGIC) + BYTES_PER_FRAME:
+                del buf[:start]  # wait for the rest of this frame
+                break
+            payload = buf[start + len(FRAME_MAGIC): start + len(FRAME_MAGIC) + BYTES_PER_FRAME]
+            del buf[:start + len(FRAME_MAGIC) + BYTES_PER_FRAME]
+
+            arr = np.frombuffer(bytes(payload), dtype="<f4")
+            if not (np.all(np.isfinite(arr)) and arr.min() >= MIN_TEMP and arr.max() <= MAX_TEMP):
+                print("dropped a frame that failed the sanity check")
                 continue
 
-            if np.all(np.isfinite(arr)) and arr.min() >= MIN_TEMP and arr.max() <= MAX_TEMP:
-                # reshape full matrix
-                matrix = arr.reshape((ROWS, COLS))
+            matrix = arr.reshape((ROWS, COLS))
 
-                # --- Full heatmap update (fixed VMIN/VMAX color scale, set once above) ---
-                im1.set_data(matrix)
+            # --- Full heatmap update (fixed VMIN/VMAX color scale, set once above) ---
+            im1.set_data(matrix)
 
-                # --- Column-average heatmap ---
-                col_avg = np.mean(matrix, axis=0)  # 16 values
-                col_matrix = np.tile(col_avg, (ROWS, 1))  # replicate for display
-                im2.set_data(col_matrix)
+            # --- Column-average heatmap ---
+            col_avg = np.mean(matrix, axis=0)  # 16 values
+            col_matrix = np.tile(col_avg, (ROWS, 1))  # replicate for display
+            im2.set_data(col_matrix)
 
-                # Update titles
-                ax1.set_title(f"Full Heatmap min:{matrix.min():.2f} max:{matrix.max():.2f}")
-                ax2.set_title(f"Column Avg min:{col_avg.min():.2f} max:{col_avg.max():.2f}")
+            # Update titles
+            ax1.set_title(f"Full Heatmap min:{matrix.min():.2f} max:{matrix.max():.2f}")
+            ax2.set_title(f"Column Avg min:{col_avg.min():.2f} max:{col_avg.max():.2f}")
 
-                # Update FPS
-                frame_count += 1
-                elapsed = time.time() - t0
-                if elapsed >= 1.0:
-                    fps = frame_count / elapsed
-                    frame_count = 0
-                    t0 = time.time()
-                    ax1.set_title(f"Full Heatmap min:{matrix.min():.2f} max:{matrix.max():.2f} fps:{fps:.1f}")
+            # Update FPS
+            frame_count += 1
+            elapsed = time.time() - t0
+            if elapsed >= 1.0:
+                fps = frame_count / elapsed
+                frame_count = 0
+                t0 = time.time()
+                ax1.set_title(f"Full Heatmap min:{matrix.min():.2f} max:{matrix.max():.2f} fps:{fps:.1f}")
 
-                fig.canvas.draw_idle()
-                plt.pause(0.001)
+            fig.canvas.draw_idle()
+            plt.pause(0.001)
 
-                offset += BYTES_PER_FRAME
-            else:
-                offset += 1
-
-        # drop consumed bytes from buffer
-        if offset:
-            buf = buf[offset:]
-
-        # avoid unbounded buffer growth
+        # avoid unbounded buffer growth if no magic ever shows up
         if len(buf) > 10 * BYTES_PER_FRAME:
-            buf = buf[-10 * BYTES_PER_FRAME :]
+            del buf[:-10 * BYTES_PER_FRAME]
 
 except KeyboardInterrupt:
     print("\nInterrupted by user")

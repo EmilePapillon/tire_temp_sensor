@@ -9,7 +9,7 @@ namespace mlx90641 {
 
 template <typename I2CAdapterT, typename LoggerT>
 MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, uint8_t i2c_addr)
-    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), ambient_(0.0f), logger_() {
+    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), data_ready_max_polls_(0), ambient_(0.0f), logger_() {
     temps_.fill(0.0f);
     ee_data_.fill(0);
     frame_data_.fill(0);
@@ -17,72 +17,66 @@ MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, u
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-bool MLX90641Sensor<I2CAdapterT, LoggerT>::init(const Mlx90641Config& config) {
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::init(const Mlx90641Config& config) {
+    data_ready_max_polls_ = config.data_ready_max_polls;
     log(LogLevel::DEBUG, "Starting MLX90641 sensor initialization");
 
     log(LogLevel::DEBUG, "Initializing I2C adapter");
-    if (i2c_.init(config.i2c_freq_khz) != 0) {
+    const I2cStatus bus_status = i2c_.init(config.i2c_freq_khz);
+    if (bus_status != I2cStatus::Success) {
         log(LogLevel::ERROR, "Failed to initialize I2C adapter");
-        return false;
+        return from_i2c(bus_status);
     }
-    log(LogLevel::DEBUG, "I2C adapter initialized successfully");
 
     log(LogLevel::DEBUG, "Dumping EEPROM data");
-    const int ee_result = dump_ee();
-    if (ee_result != 0) {
+    const Status ee_status = dump_ee();
+    if (ee_status != Status::Success) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "Failed to dump EEPROM data, error: %d", ee_result);
+        snprintf(msg, sizeof(msg), "Failed to dump EEPROM data: %s", status_name(ee_status));
         log(LogLevel::ERROR, msg);
-        return false;
+        return ee_status;
     }
-    log(LogLevel::DEBUG, "EEPROM data dumped successfully");
 
     log(LogLevel::DEBUG, "Extracting calibration parameters");
-    const int param_result = extract_parameters();
-    if (param_result != 0) {
+    const Status param_status = extract_parameters();
+    if (param_status != Status::Success) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "Failed to extract parameters, error: %d", param_result);
+        snprintf(msg, sizeof(msg), "Failed to extract parameters: %s", status_name(param_status));
         log(LogLevel::ERROR, msg);
-        return false;
-    }
-    log(LogLevel::DEBUG, "Calibration parameters extracted successfully");
-
-    const int res_result = set_resolution(config.resolution);
-    if (res_result != 0) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Failed to set resolution, error: %d", res_result);
-        log(LogLevel::WARN, msg);
-    } else {
-        log(LogLevel::DEBUG, "Resolution set successfully");
+        return param_status;
     }
 
-    const int rate_result = set_refresh_rate(config.refresh_rate);
-    if (rate_result != 0) {
+    const Status res_status = set_resolution(config.resolution);
+    if (res_status != Status::Success) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "Failed to set refresh rate, error: %d", rate_result);
+        snprintf(msg, sizeof(msg), "Failed to set resolution: %s", status_name(res_status));
         log(LogLevel::WARN, msg);
-    } else {
-        log(LogLevel::DEBUG, "Refresh rate set successfully");
+    }
+
+    const Status rate_status = set_refresh_rate(config.refresh_rate);
+    if (rate_status != Status::Success) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Failed to set refresh rate: %s", status_name(rate_status));
+        log(LogLevel::WARN, msg);
     }
 
     log(LogLevel::INFO, "MLX90641 sensor initialization completed successfully");
-    return true;
+    return Status::Success;
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-bool MLX90641Sensor<I2CAdapterT, LoggerT>::read_frame() {
-    if (get_frame_data() != 0) {
-        return false;
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::read_frame() {
+    const Status status = get_frame_data();
+    if (status != Status::Success) {
+        return status;
     }
     ambient_ = get_ta();
-    return true;
+    return Status::Success;
 }
 
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps() {
-    const float emissivity = get_emissivity();
-    const float tr = ambient_;
-    calculate_to(emissivity, tr);
+    calculate_to(get_emissivity(), ambient_);
     bad_pixels_correction();
 }
 
@@ -100,17 +94,32 @@ float MLX90641Sensor<I2CAdapterT, LoggerT>::get_ambient() const {
 // ------------------- Private member functions -------------------
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::dump_ee() {
-    int error = i2c_.read(i2c_addr_, eeprom_start_address, ee_data_size, ee_data_.data());
-    if (error == 0) {
-        error = hamming_decode();
-    }
-    return error;
+float MLX90641Sensor<I2CAdapterT, LoggerT>::signed_word(uint16_t raw) {
+    return static_cast<float>(static_cast<int16_t>(raw));
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::hamming_decode() {
-    int error = 0;
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::dump_ee() {
+    const I2cStatus status = i2c_.read(i2c_addr_, eeprom_start_address, ee_data_size, ee_data_.data());
+    if (status != I2cStatus::Success) {
+        return from_i2c(status);
+    }
+    switch (hamming_decode()) {
+        case HammingResult::Clean:
+            return Status::Success;
+        case HammingResult::Corrected:
+            // The Melexis driver reports this as a warning; the corrected data is valid.
+            log(LogLevel::WARN, "EEPROM had single-bit errors that were corrected");
+            return Status::Success;
+        case HammingResult::Uncorrectable:
+            break;
+    }
+    return Status::EepromCorrupt;
+}
+
+template <typename I2CAdapterT, typename LoggerT>
+typename MLX90641Sensor<I2CAdapterT, LoggerT>::HammingResult MLX90641Sensor<I2CAdapterT, LoggerT>::hamming_decode() {
+    HammingResult result = HammingResult::Clean;
     int16_t parity[5];
     int8_t d[16];
     int16_t check;
@@ -118,12 +127,6 @@ int MLX90641Sensor<I2CAdapterT, LoggerT>::hamming_decode() {
     uint16_t mask;
 
     for (int addr = 16; addr < 832; addr++) {
-        parity[0] = -1;
-        parity[1] = -1;
-        parity[2] = -1;
-        parity[3] = -1;
-        parity[4] = -1;
-
         data = ee_data_[addr];
         mask = 1;
         for (int i = 0; i < 16; i++) {
@@ -160,8 +163,8 @@ int MLX90641Sensor<I2CAdapterT, LoggerT>::hamming_decode() {
                     case 21: d[1] = 1 - d[1]; break;
                     case 19: d[0] = 1 - d[0]; break;
                 }
-                if (error == 0) {
-                    error = -9;
+                if (result == HammingResult::Clean) {
+                    result = HammingResult::Corrected;
                 }
                 data = 0;
                 mask = 1;
@@ -170,247 +173,198 @@ int MLX90641Sensor<I2CAdapterT, LoggerT>::hamming_decode() {
                     mask = mask << 1;
                 }
             } else {
-                error = -10;
+                result = HammingResult::Uncorrectable;
             }
         }
         ee_data_[addr] = data & 0x07FF;
     }
-    return error;
+    return result;
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::get_frame_data() {
-    uint16_t data_ready = 0;
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::get_frame_data() {
     uint16_t control_register_1_value = 0;
     uint16_t status_register_value = 0;
-    int error = 1;
-    uint8_t cnt = 0;
+    uint16_t data_ready = 0;
     uint8_t sub_page = 0;
+    uint8_t attempts = 0;
+    I2cStatus i2c_status;
 
-    while (data_ready == 0) {
-        error = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
-        if (error != 0) {
-            return error;
+    // Wait for the sensor to flag a new frame, bounded so a dead sensor cannot hang the caller.
+    for (uint32_t polls = 0; data_ready == 0; polls++) {
+        if (polls >= data_ready_max_polls_) {
+            return Status::DataReadyTimeout;
         }
-        data_ready = status_register_value & 0x0008;
+        i2c_status = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
+        if (i2c_status != I2cStatus::Success) {
+            return from_i2c(i2c_status);
+        }
+        data_ready = status_register_value & status_new_data_mask;
     }
-    sub_page = status_register_value & 0x0001;
+    sub_page = status_register_value & status_sub_page_mask;
 
-    while (data_ready != 0 && cnt < 5) {
-        error = i2c_.write(i2c_addr_, status_register, 0x0030);
-        if (error == -1) {
-            return error;
+    // Acknowledge and read until the new-data flag stays clear, i.e. the frame
+    // did not roll over underneath us.
+    while (data_ready != 0 && attempts < frame_sync_max_attempts) {
+        // The status register is self-clearing, so a read-back mismatch is expected here.
+        i2c_status = i2c_.write(i2c_addr_, status_register, status_clear_new_data);
+        if (i2c_status != I2cStatus::Success && i2c_status != I2cStatus::VerifyMismatch) {
+            return from_i2c(i2c_status);
         }
-        if (sub_page == 0) {
-            error = i2c_.read(i2c_addr_, 0x0400, 32, frame_data_.data());
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0440, 32, frame_data_.data() + 32);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0480, 32, frame_data_.data() + 64);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x04C0, 32, frame_data_.data() + 96);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0500, 32, frame_data_.data() + 128);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0540, 32, frame_data_.data() + 160);
-            if (error != 0) { return error; }
-        } else {
-            error = i2c_.read(i2c_addr_, 0x0420, 32, frame_data_.data());
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0460, 32, frame_data_.data() + 32);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x04A0, 32, frame_data_.data() + 64);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x04E0, 32, frame_data_.data() + 96);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0520, 32, frame_data_.data() + 128);
-            if (error != 0) { return error; }
-            error = i2c_.read(i2c_addr_, 0x0560, 32, frame_data_.data() + 160);
-            if (error != 0) { return error; }
+
+        const uint16_t bank_base = (sub_page == 0) ? 0x0400 : 0x0420;
+        for (uint16_t bank = 0; bank < 6; bank++) {
+            i2c_status = i2c_.read(i2c_addr_, static_cast<uint16_t>(bank_base + bank * 0x40), 32,
+                                   frame_data_.data() + bank * 32);
+            if (i2c_status != I2cStatus::Success) {
+                return from_i2c(i2c_status);
+            }
         }
-        error = i2c_.read(i2c_addr_, 0x0580, 48, frame_data_.data() + 192);
-        if (error != 0) {
-            return error;
+        i2c_status = i2c_.read(i2c_addr_, 0x0580, 48, frame_data_.data() + 192);
+        if (i2c_status != I2cStatus::Success) {
+            return from_i2c(i2c_status);
         }
-        error = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
-        if (error != 0) {
-            return error;
+
+        i2c_status = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
+        if (i2c_status != I2cStatus::Success) {
+            return from_i2c(i2c_status);
         }
-        data_ready = status_register_value & 0x0008;
-        sub_page = status_register_value & 0x0001;
-        cnt = cnt + 1;
+        data_ready = status_register_value & status_new_data_mask;
+        sub_page = status_register_value & status_sub_page_mask;
+        attempts++;
     }
-    if (cnt > 4) {
-        return -8;
+    if (data_ready != 0) {
+        return Status::FrameSyncFailed;
     }
-    error = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
+
+    i2c_status = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
+    if (i2c_status != I2cStatus::Success) {
+        return from_i2c(i2c_status);
+    }
     frame_data_[240] = control_register_1_value;
-    frame_data_[241] = status_register_value & 0x0001;
-    if (error != 0) {
-        return error;
-    }
-    return frame_data_[241];
+    frame_data_[241] = status_register_value & status_sub_page_mask;
+    // Both sub-pages are complete frames on the MLX90641; they differ only in
+    // which offset calibration set applies (see calculate_to).
+    return Status::Success;
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::extract_parameters() {
-    const int error = check_eeprom_valid();
-    bool extractions_successful = false;
-    if (error == 0) {
-        {
-            char debug_msg[160];
-            snprintf(debug_msg, sizeof(debug_msg),
-                     "Raw EEPROM - [34]: 0x%04X, [52]: 0x%04X, [53]: 0x%04X, [54]: 0x%04X, [45]: 0x%04X, [256]: 0x%04X",
-                     ee_data_[34],    // KsTa
-                     ee_data_[52],    // ksTo scale
-                     ee_data_[53],    // ksTo[0]
-                     ee_data_[54],    // ksTo[1]
-                     ee_data_[45],    // cpAlpha
-                     ee_data_[256]);  // alpha[0]
-            log(LogLevel::DEBUG, debug_msg);
-        }
-
-        extractions_successful = MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_);
-
-        {
-            char debug_msg[160];
-            snprintf(debug_msg, sizeof(debug_msg),
-                     "Critical params - ksTo[1]: %.6f, tgc: %.6f, cpAlpha: %.6f, alpha[0]: %.6f",
-                     static_cast<double>(calibration_parameters_.ksTo[1]),
-                     static_cast<double>(calibration_parameters_.tgc),
-                     static_cast<double>(calibration_parameters_.cpAlpha),
-                     static_cast<double>(calibration_parameters_.alpha[0]));
-            log(LogLevel::DEBUG, debug_msg);
-        }
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::extract_parameters() {
+    const Status valid = check_eeprom_valid();
+    if (valid != Status::Success) {
+        return valid;
     }
 
-    const bool success = extractions_successful && (error == 0);
-    return success ? 0 : -1;
+    {
+        char debug_msg[160];
+        snprintf(debug_msg, sizeof(debug_msg),
+                 "Raw EEPROM - [34]: 0x%04X, [52]: 0x%04X, [53]: 0x%04X, [54]: 0x%04X, [45]: 0x%04X, [256]: 0x%04X",
+                 ee_data_[34],    // KsTa
+                 ee_data_[52],    // ksTo scale
+                 ee_data_[53],    // ksTo[0]
+                 ee_data_[54],    // ksTo[1]
+                 ee_data_[45],    // cpAlpha
+                 ee_data_[256]);  // alpha[0]
+        log(LogLevel::DEBUG, debug_msg);
+    }
+
+    if (!MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_)) {
+        return Status::CalibrationExtractionFailed;
+    }
+
+    {
+        char debug_msg[160];
+        snprintf(debug_msg, sizeof(debug_msg),
+                 "Critical params - ksTo[1]: %.6f, tgc: %.6f, cpAlpha: %.6f, alpha[0]: %.6f",
+                 static_cast<double>(calibration_parameters_.ksTo[1]),
+                 static_cast<double>(calibration_parameters_.tgc),
+                 static_cast<double>(calibration_parameters_.cpAlpha),
+                 static_cast<double>(calibration_parameters_.alpha[0]));
+        log(LogLevel::DEBUG, debug_msg);
+    }
+    return Status::Success;
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::set_resolution(Resolution resolution) {
-    uint16_t control_register_1_value;
-    int value = (static_cast<uint8_t>(resolution) & 0x03) << 10;
-
-    int error = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
-    if (error != 0) {
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::set_resolution(Resolution resolution) {
+    uint16_t control_register_1_value = 0;
+    I2cStatus status = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
+    if (status != I2cStatus::Success) {
         log(LogLevel::ERROR, "Failed to read control register for setting resolution");
+        return from_i2c(status);
     }
-    if (error == 0) {
-        value = (control_register_1_value & 0xF3FF) | value;
-        error = i2c_.write(i2c_addr_, control_register_1, static_cast<uint16_t>(value));
-    }
-    if (error != 0) {
+    const uint16_t field = static_cast<uint16_t>((static_cast<uint8_t>(resolution) & 0x03) << 10);
+    const uint16_t value = static_cast<uint16_t>((control_register_1_value & 0xF3FF) | field);
+    status = i2c_.write(i2c_addr_, control_register_1, value);
+    if (status != I2cStatus::Success) {
         log(LogLevel::ERROR, "Failed to write control register for setting resolution");
     }
-    return error;
+    return from_i2c(status);
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::get_cur_resolution() const {
-    uint16_t control_register_1_value;
-    const int error = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
-    if (error != 0) {
-        return error;
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::set_refresh_rate(RefreshRate refresh_rate) {
+    uint16_t control_register_1_value = 0;
+    I2cStatus status = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
+    if (status != I2cStatus::Success) {
+        return from_i2c(status);
     }
-    return (control_register_1_value & 0x0C00) >> 10;
-}
-
-template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::set_refresh_rate(RefreshRate refresh_rate) {
-    uint16_t control_register_1_value;
-    int value = (static_cast<uint8_t>(refresh_rate) & 0x07) << 7;
-
-    int error = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
-    if (error == 0) {
-        value = (control_register_1_value & 0xFC7F) | value;
-        error = i2c_.write(i2c_addr_, control_register_1, static_cast<uint16_t>(value));
-    }
-    return error;
-}
-
-template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::get_refresh_rate() const {
-    uint16_t control_register_1_value;
-    const int error = i2c_.read(i2c_addr_, control_register_1, 1, &control_register_1_value);
-    if (error != 0) {
-        return error;
-    }
-    return (control_register_1_value & 0x0380) >> 7;
+    const uint16_t field = static_cast<uint16_t>((static_cast<uint8_t>(refresh_rate) & 0x07) << 7);
+    const uint16_t value = static_cast<uint16_t>((control_register_1_value & 0xFC7F) | field);
+    status = i2c_.write(i2c_addr_, control_register_1, value);
+    return from_i2c(status);
 }
 
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_to(float emissivity, float tr) {
-    float vdd;
-    float ta;
-    float ta4;
-    float tr4;
-    float ta_tr;
-    float gain;
-    float ir_data_cp;
-    float ir_data;
-    float alpha_compensated;
-    float sx;
-    float to;
-    float alpha_corr_r[8];
-    int8_t range;
-    uint16_t sub_page;
-
     const ParamsMLX90641& p = calibration_parameters_;
+    const uint16_t sub_page = frame_data_[241];
 
-    sub_page = frame_data_[241];
-    vdd = get_vdd();
-    ta = get_ta();
-    ta4 = pow((ta + 273.15), (double)4);
-    tr4 = pow((tr + 273.15), (double)4);
-    ta_tr = tr4 - (tr4 - ta4) / emissivity;
+    const float vdd = get_vdd();
+    const float ta = get_ta();
+    const float ta_k2 = (ta + kelvin_offset) * (ta + kelvin_offset);
+    const float tr_k2 = (tr + kelvin_offset) * (tr + kelvin_offset);
+    const float ta4 = ta_k2 * ta_k2;
+    const float tr4 = tr_k2 * tr_k2;
+    const float ta_tr = tr4 - (tr4 - ta4) / emissivity;
 
-    alpha_corr_r[1] = 1 / (1 + p.ksTo[1] * 20);
-    alpha_corr_r[0] = alpha_corr_r[1] / (1 + p.ksTo[0] * 20);
-    alpha_corr_r[2] = 1;
-    alpha_corr_r[3] = (1 + p.ksTo[2] * p.ct[2]);
-    alpha_corr_r[4] = alpha_corr_r[3] * (1 + p.ksTo[3] * (p.ct[4] - p.ct[3]));
-    alpha_corr_r[5] = alpha_corr_r[4] * (1 + p.ksTo[4] * (p.ct[5] - p.ct[4]));
-    alpha_corr_r[6] = alpha_corr_r[5] * (1 + p.ksTo[5] * (p.ct[6] - p.ct[5]));
-    alpha_corr_r[7] = alpha_corr_r[6] * (1 + p.ksTo[6] * (p.ct[7] - p.ct[6]));
+    float alpha_corr_r[8];
+    alpha_corr_r[1] = 1.0f / (1.0f + p.ksTo[1] * 20.0f);
+    alpha_corr_r[0] = alpha_corr_r[1] / (1.0f + p.ksTo[0] * 20.0f);
+    alpha_corr_r[2] = 1.0f;
+    alpha_corr_r[3] = (1.0f + p.ksTo[2] * p.ct[2]);
+    alpha_corr_r[4] = alpha_corr_r[3] * (1.0f + p.ksTo[3] * (p.ct[4] - p.ct[3]));
+    alpha_corr_r[5] = alpha_corr_r[4] * (1.0f + p.ksTo[4] * (p.ct[5] - p.ct[4]));
+    alpha_corr_r[6] = alpha_corr_r[5] * (1.0f + p.ksTo[5] * (p.ct[6] - p.ct[5]));
+    alpha_corr_r[7] = alpha_corr_r[6] * (1.0f + p.ksTo[6] * (p.ct[7] - p.ct[6]));
 
     //------------------------- Gain calculation -----------------------------------
-    gain = frame_data_[202];
-    if (gain > 32767) {
-        gain = gain - 65536;
-    }
-    gain = p.gainEE / gain;
+    const float gain = p.gainEE / signed_word(frame_data_[202]);
 
     //------------------------- To calculation -------------------------------------
-    ir_data_cp = frame_data_[200];
-    if (ir_data_cp > 32767) {
-        ir_data_cp = ir_data_cp - 65536;
-    }
-    ir_data_cp = ir_data_cp * gain;
-    ir_data_cp = ir_data_cp - p.cpOffset * (1 + p.cpKta * (ta - 25)) * (1 + p.cpKv * (vdd - 3.3));
+    float ir_data_cp = signed_word(frame_data_[200]) * gain;
+    ir_data_cp = ir_data_cp - p.cpOffset * (1.0f + p.cpKta * (ta - 25.0f)) * (1.0f + p.cpKv * (vdd - 3.3f));
 
-    for (int pixel_number = 0; pixel_number < 192; pixel_number++) {
-        ir_data = frame_data_[pixel_number];
-        if (ir_data > 32767) {
-            ir_data = ir_data - 65536;
-        }
-        ir_data = ir_data * gain;
+    for (std::size_t pixel_number = 0; pixel_number < num_pixels; pixel_number++) {
+        float ir_data = signed_word(frame_data_[pixel_number]) * gain;
 
-        ir_data = ir_data - p.offset[sub_page][pixel_number] * (1 + p.kta[pixel_number] * (ta - 25)) *
-                                (1 + p.kv[pixel_number] * (vdd - 3.3));
+        ir_data = ir_data - p.offset[sub_page][pixel_number] * (1.0f + p.kta[pixel_number] * (ta - 25.0f)) *
+                                (1.0f + p.kv[pixel_number] * (vdd - 3.3f));
 
         ir_data = ir_data - p.tgc * ir_data_cp;
 
         ir_data = ir_data / emissivity;
 
-        alpha_compensated = (p.alpha[pixel_number] - p.tgc * p.cpAlpha) * (1 + p.KsTa * (ta - 25));
+        const float alpha_compensated =
+            (p.alpha[pixel_number] - p.tgc * p.cpAlpha) * (1.0f + p.KsTa * (ta - 25.0f));
 
-        sx = alpha_compensated * alpha_compensated * alpha_compensated * (ir_data + alpha_compensated * ta_tr);
-        sx = sqrt(sqrt(sx)) * p.ksTo[1];
+        float sx = alpha_compensated * alpha_compensated * alpha_compensated * (ir_data + alpha_compensated * ta_tr);
+        sx = sqrtf(sqrtf(sx)) * p.ksTo[1];
 
-        to = sqrt(sqrt(ir_data / (alpha_compensated * (1 - p.ksTo[1] * 273.15) + sx) + ta_tr)) - 273.15;
+        float to = sqrtf(sqrtf(ir_data / (alpha_compensated * (1.0f - p.ksTo[1] * kelvin_offset) + sx) + ta_tr)) -
+                   kelvin_offset;
 
+        int range;
         if (to < p.ct[1]) {
             range = 0;
         } else if (to < p.ct[2]) {
@@ -429,101 +383,35 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_to(float emissivity, float 
             range = 7;
         }
 
-        to = sqrt(sqrt(ir_data / (alpha_compensated * alpha_corr_r[range] * (1 + p.ksTo[range] * (to - p.ct[range]))) +
-                       ta_tr)) -
-             273.15;
+        to = sqrtf(sqrtf(ir_data / (alpha_compensated * alpha_corr_r[range] *
+                                    (1.0f + p.ksTo[range] * (to - p.ct[range]))) +
+                         ta_tr)) -
+             kelvin_offset;
         temps_[pixel_number] = to;
     }
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-void MLX90641Sensor<I2CAdapterT, LoggerT>::get_image() {
-    float vdd;
-    float ta;
-    float gain;
-    float ir_data_cp;
-    float ir_data;
-    float alpha_compensated;
-    float image;
-    uint16_t sub_page;
-
-    const ParamsMLX90641& p = calibration_parameters_;
-
-    sub_page = frame_data_[241];
-    vdd = get_vdd();
-    ta = get_ta();
-
-    //------------------------- Gain calculation -----------------------------------
-    gain = frame_data_[202];
-    if (gain > 32767) {
-        gain = gain - 65536;
-    }
-    gain = p.gainEE / gain;
-
-    //------------------------- Image calculation -------------------------------------
-    ir_data_cp = frame_data_[200];
-    if (ir_data_cp > 32767) {
-        ir_data_cp = ir_data_cp - 65536;
-    }
-    ir_data_cp = ir_data_cp * gain;
-    ir_data_cp = ir_data_cp - p.cpOffset * (1 + p.cpKta * (ta - 25)) * (1 + p.cpKv * (vdd - 3.3));
-
-    for (int pixel_number = 0; pixel_number < 192; pixel_number++) {
-        ir_data = frame_data_[pixel_number];
-        if (ir_data > 32767) {
-            ir_data = ir_data - 65536;
-        }
-        ir_data = ir_data * gain;
-
-        ir_data = ir_data - p.offset[sub_page][pixel_number] * (1 + p.kta[pixel_number] * (ta - 25)) *
-                                (1 + p.kv[pixel_number] * (vdd - 3.3));
-
-        ir_data = ir_data - p.tgc * ir_data_cp;
-
-        alpha_compensated = (p.alpha[pixel_number] - p.tgc * p.cpAlpha);
-
-        image = ir_data / alpha_compensated;
-
-        temps_[pixel_number] = image;
-    }
-}
-
-template <typename I2CAdapterT, typename LoggerT>
 float MLX90641Sensor<I2CAdapterT, LoggerT>::get_vdd() const {
-    float vdd = frame_data_[234];
-    if (vdd > 32767) {
-        vdd = vdd - 65536;
-    }
+    const ParamsMLX90641& p = calibration_parameters_;
     const int resolution_ram = (frame_data_[240] & 0x0C00) >> 10;
     const float resolution_correction =
-        pow(2, (double)calibration_parameters_.resolutionEE) / pow(2, (double)resolution_ram);
-    vdd = (resolution_correction * vdd - calibration_parameters_.vdd25) / calibration_parameters_.kVdd + 3.3;
-    return vdd;
+        static_cast<float>(1 << p.resolutionEE) / static_cast<float>(1 << resolution_ram);
+    const float vdd_raw = signed_word(frame_data_[234]);
+    return (resolution_correction * vdd_raw - p.vdd25) / p.kVdd + 3.3f;
 }
 
 template <typename I2CAdapterT, typename LoggerT>
 float MLX90641Sensor<I2CAdapterT, LoggerT>::get_ta() const {
+    const ParamsMLX90641& p = calibration_parameters_;
     const float vdd = get_vdd();
+    const float ptat = signed_word(frame_data_[224]);
+    float ptat_art = signed_word(frame_data_[192]);
+    ptat_art = (ptat / (ptat * p.alphaPTAT + ptat_art)) * 262144.0f;  // 2^18
 
-    float ptat = frame_data_[224];
-    if (ptat > 32767) {
-        ptat = ptat - 65536;
-    }
-
-    float ptat_art = frame_data_[192];
-    if (ptat_art > 32767) {
-        ptat_art = ptat_art - 65536;
-    }
-    ptat_art = (ptat / (ptat * calibration_parameters_.alphaPTAT + ptat_art)) * pow(2, (double)18);
-
-    float ta = (ptat_art / (1 + calibration_parameters_.KvPTAT * (vdd - 3.3)) - calibration_parameters_.vPTAT25);
-    ta = ta / calibration_parameters_.KtPTAT + 25;
+    float ta = (ptat_art / (1.0f + p.KvPTAT * (vdd - 3.3f)) - p.vPTAT25);
+    ta = ta / p.KtPTAT + 25.0f;
     return ta;
-}
-
-template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::get_sub_page_number() const {
-    return frame_data_[241];
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -540,13 +428,13 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::bad_pixels_correction() {
         if (column == 0) {
             temps_[index] = temps_[index + 1];
         } else if (column == 1 || column == 14) {
-            temps_[index] = (temps_[index - 1] + temps_[index + 1]) / 2.0;
+            temps_[index] = (temps_[index - 1] + temps_[index + 1]) / 2.0f;
         } else if (column == 15) {
             temps_[index] = temps_[index - 1];
         } else {
             ap[0] = temps_[index + 1] - temps_[index + 2];
             ap[1] = temps_[index - 1] - temps_[index - 2];
-            if (fabs(ap[0]) > fabs(ap[1])) {
+            if (fabsf(ap[0]) > fabsf(ap[1])) {
                 temps_[index] = temps_[index - 1] + ap[1];
             } else {
                 temps_[index] = temps_[index + 1] + ap[0];
@@ -563,12 +451,9 @@ float MLX90641Sensor<I2CAdapterT, LoggerT>::get_emissivity() const {
 }
 
 template <typename I2CAdapterT, typename LoggerT>
-int MLX90641Sensor<I2CAdapterT, LoggerT>::check_eeprom_valid() const {
+Status MLX90641Sensor<I2CAdapterT, LoggerT>::check_eeprom_valid() const {
     const int device_select = ee_data_[10] & 0x0040;
-    if (device_select != 0) {
-        return 0;
-    }
-    return -7;
+    return (device_select != 0) ? Status::Success : Status::NotAnMlx90641;
 }
 
 template <typename I2CAdapterT, typename LoggerT>

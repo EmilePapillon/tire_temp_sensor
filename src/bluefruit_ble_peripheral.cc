@@ -8,18 +8,22 @@ void BluefruitBlePeripheral::set_device_name(const char* name) {
     Bluefruit.setName(name);
 }
 
-void BluefruitBlePeripheral::add_service(ble::Uuid16 uuid) {
+bool BluefruitBlePeripheral::add_service(ble::Uuid16 uuid) {
     if (service_count_ >= max_services) {
-        return;
+        return false;
     }
-    BLEService& service = services_[service_count_++];
+    BLEService& service = services_[service_count_];
     service.setUuid(BLEUuid(uuid));
-    service.begin();
+    if (service.begin() != ERROR_NONE) {
+        return false;
+    }
+    service_count_++;
+    return true;
 }
 
-void BluefruitBlePeripheral::add_characteristic(ble::Uuid16 uuid, const ble::CharacteristicProps& props) {
-    if (characteristic_count_ >= max_characteristics) {
-        return;
+bool BluefruitBlePeripheral::add_characteristic(ble::Uuid16 uuid, const ble::CharacteristicProps& props) {
+    if (characteristic_count_ >= max_characteristics || service_count_ == 0) {
+        return false;
     }
     uint8_t bluefruit_props = 0;
     if (props.read) {
@@ -40,14 +44,18 @@ void BluefruitBlePeripheral::add_characteristic(ble::Uuid16 uuid, const ble::Cha
     const bool writable = props.write || props.write_without_response;
 
     characteristic_uuids_[characteristic_count_] = uuid;
-    BLECharacteristic& chr = characteristics_[characteristic_count_++];
+    BLECharacteristic& chr = characteristics_[characteristic_count_];
     chr.setUuid(BLEUuid(uuid));
     chr.setProperties(bluefruit_props);
     chr.setPermission(SECMODE_OPEN, writable ? SECMODE_OPEN : SECMODE_NO_ACCESS);
     if (props.fixed_len != 0) {
         chr.setFixedLen(props.fixed_len);
     }
-    chr.begin();  // attaches to the most recently begun BLEService
+    if (chr.begin() != ERROR_NONE) {  // attaches to the most recently begun BLEService
+        return false;
+    }
+    characteristic_count_++;
+    return true;
 }
 
 bool BluefruitBlePeripheral::notify(ble::Uuid16 characteristic, const uint8_t* data, std::size_t len) {
@@ -58,7 +66,7 @@ bool BluefruitBlePeripheral::notify(ble::Uuid16 characteristic, const uint8_t* d
     return chr->notify(data, static_cast<uint16_t>(len));
 }
 
-void BluefruitBlePeripheral::start_advertising(const ble::AdvertisingParams& params) {
+bool BluefruitBlePeripheral::start_advertising(const ble::AdvertisingParams& params) {
     Bluefruit.setTxPower(params.tx_power_dbm);
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
     Bluefruit.Advertising.addTxPower();
@@ -69,7 +77,7 @@ void BluefruitBlePeripheral::start_advertising(const ble::AdvertisingParams& par
     Bluefruit.Advertising.restartOnDisconnect(params.restart_on_disconnect);
     Bluefruit.Advertising.setInterval(params.interval_fast, params.interval_slow);
     Bluefruit.Advertising.setFastTimeout(params.fast_timeout_s);
-    Bluefruit.Advertising.start(params.timeout_s);
+    return Bluefruit.Advertising.start(params.timeout_s);
 }
 
 bool BluefruitBlePeripheral::is_connected() {
