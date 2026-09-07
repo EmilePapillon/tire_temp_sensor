@@ -183,6 +183,17 @@ void test_broken_pixel_scan_stops_at_two() {
     TEST_ASSERT_FALSE(parser.extract_all(params));
 }
 
+void test_scale_helpers_reject_oversized_exponents() {
+    // Valid range is unaffected.
+    TEST_ASSERT_EQUAL_FLOAT(0.25f, scale_by_division(1, 2));
+    TEST_ASSERT_EQUAL_INT16(8, scale_by_multiplication(1, 3));
+    // A corrupt scale field must not trigger a shift wider than the type.
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, scale_by_division(12345, 64));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, scale_by_division(12345, 200));
+    TEST_ASSERT_EQUAL_INT16(0, scale_by_multiplication(123, 31));
+    TEST_ASSERT_EQUAL_INT16(0, scale_by_multiplication(123, 200));
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_kv_ptat);
@@ -209,5 +220,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_offset);
     RUN_TEST(test_broken_pixels);
     RUN_TEST(test_broken_pixel_scan_stops_at_two);
+    RUN_TEST(test_scale_helpers_reject_oversized_exponents);
     return UNITY_END();
 }
