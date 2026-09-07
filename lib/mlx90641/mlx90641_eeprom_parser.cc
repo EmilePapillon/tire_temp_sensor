@@ -363,7 +363,9 @@ std::array<std::uint16_t, 2> MLX90641EEpromParser::get_broken_pixels() const
     std::fill(broken_pixels.begin(), broken_pixels.end(), 0xFFFF);
 
     std::size_t num_broken_pixels = 0u;
-    for (std::size_t i = 0u; i < pixel_count && num_broken_pixels < 3; ++i) 
+    // broken_pixels holds two entries; extract_all() rejects the calibration once
+    // either is set, so recording the first two deviating pixels is enough.
+    for (std::size_t i = 0u; i < pixel_count && num_broken_pixels < broken_pixels.size(); ++i)
     {
         const uint16_t address1 = EepromAddr::offset_even + i;
         const SingleEepromWord word1 = {address1, 0, 11, 0, false};

@@ -161,6 +161,28 @@ void test_broken_pixels() {
     }
 }
 
+void test_broken_pixel_scan_stops_at_two() {
+    // Three pixels with every per-pixel calibration word zeroed. The scan must
+    // record only the first two (broken_pixels has room for two) and must not
+    // write past the array while looking for a third.
+    auto data = test_eeprom_data;
+    constexpr std::array<uint16_t, 4> bases = {
+        EepromAddr::offset_even, EepromAddr::alpha_pixel, EepromAddr::kta_pixel, EepromAddr::offset_odd};
+    for (uint16_t pixel = 0; pixel < 3; ++pixel) {
+        for (const uint16_t base : bases) {
+            data[base - eeprom_start_address + pixel] = 0;
+        }
+    }
+
+    MLX90641EEpromParser parser(data);
+    const auto broken = parser.get_broken_pixels();
+    TEST_ASSERT_EQUAL_UINT16(0, broken[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, broken[1]);
+
+    ParamsMLX90641 params;
+    TEST_ASSERT_FALSE(parser.extract_all(params));
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_kv_ptat);
@@ -186,5 +208,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_ct);
     RUN_TEST(test_offset);
     RUN_TEST(test_broken_pixels);
+    RUN_TEST(test_broken_pixel_scan_stops_at_two);
     return UNITY_END();
 }
