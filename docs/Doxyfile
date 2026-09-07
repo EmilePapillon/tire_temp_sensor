@@ -19,7 +19,10 @@ INCLUDE_PATH           = test
 FILE_PATTERNS          = *.hh *.inl *.cc *.cpp *.md
 RECURSIVE              = YES
 EXTENSION_MAPPING      = inl=C++
-EXCLUDE_PATTERNS       = */build_info.hh
+# README.md is the mainpage; per-directory READMEs (e.g. lib/mlx90641/README.md)
+# are repo docs rendered by GitHub, and older Doxygen treats each as a competing
+# \mainpage, so keep them out of the API build.
+EXCLUDE_PATTERNS       = */build_info.hh */lib/*/README.md
 
 EXTRACT_PRIVATE        = YES
 EXTRACT_STATIC         = YES
