@@ -71,10 +71,9 @@ public:
 
     /// @brief Hard ceiling on status-register reads while waiting for a new frame.
     ///
-    /// Not a tuned timeout: a backstop so read_frame() cannot spin forever if the
-    /// sensor stops responding and the driver is used without an external
-    /// watchdog. At 400 kHz this is on the order of ten seconds; the slowest
-    /// (0.5 Hz) refresh rate still needs far fewer polls than this.
+    /// Not a tuned timeout: a coarse backstop so read_frame() cannot spin forever
+    /// on a sensor that has stopped responding. At 400 kHz it is on the order of
+    /// ten seconds; even the slowest (0.5 Hz) refresh rate needs far fewer polls.
     static constexpr uint32_t new_data_poll_limit = 50000;
 
     /// @brief Bind to a bus. Nothing is touched until init().
@@ -93,9 +92,8 @@ public:
     /// @brief Acquire the next frame (either sub-page) and its ambient temperature.
     ///
     /// The wait for a new frame is bounded by new_data_poll_limit; exceeding it
-    /// returns DataReadyTimeout. That bound is only a safety net for reuse
-    /// outside a watchdogged context -- in this firmware a persistently stalled
-    /// sensor is recovered by the caller letting the watchdog reset the board.
+    /// returns DataReadyTimeout. The caller decides how to handle that (retry,
+    /// re-init, reset); the driver takes no recovery action of its own.
     /// @return Success, DataReadyTimeout, FrameSyncFailed, or a bus failure.
     Status read_frame();
 

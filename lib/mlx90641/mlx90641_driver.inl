@@ -237,9 +237,8 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::get_frame_data() {
     I2cStatus i2c_status;
 
     // Wait for the sensor to flag a new frame. Bounded by new_data_poll_limit so
-    // a non-responsive sensor cannot spin here forever; that ceiling is a safety
-    // net, not a tuned timeout (the firmware's real recovery is the caller
-    // letting the watchdog reset the board). A bus error returns at once.
+    // a non-responsive sensor cannot spin here forever; that ceiling is a coarse
+    // backstop, not a tuned timeout. A bus error returns at once.
     for (uint32_t polls = 0; data_ready == 0; ++polls) {
         if (polls >= new_data_poll_limit) {
             return Status::DataReadyTimeout;
