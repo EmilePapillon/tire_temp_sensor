@@ -64,15 +64,17 @@ Runs in order, stopping at the first fatal failure:
 4. `set_resolution` / `set_refresh_rate` — a bus failure here is logged at
    `WARN` only; the sensor keeps its power-on defaults and `init` still succeeds.
 
-`Mlx90641Config` carries only `i2c_freq_khz`, `resolution`, `refresh_rate`.
-There is no timeout/poll-count field — see the recovery contract below.
+`Mlx90641Config` carries only `i2c_freq_khz`, `resolution`, `refresh_rate`. The
+frame-wait ceiling is a driver constant (`new_data_poll_limit`), not a config
+field — see the recovery contract below.
 
 ## `read_frame()`
 
 Implements the status-register handshake:
 
-1. **Poll** `status_register` until the new-data bit is set. This wait is
-   **unbounded** — see the recovery contract.
+1. **Poll** `status_register` until the new-data bit is set, for at most
+   `new_data_poll_limit` reads (→ `DataReadyTimeout`). That ceiling is a safety
+   net, not a tuned timeout — see the recovery contract.
 2. Note the sub-page bit, then acknowledge (write `0x0030`, which self-clears, so
    a write-back mismatch is expected and ignored) and read all 6 pixel banks plus
    the 48-word auxiliary block. Re-read the status register; if new-data is set
@@ -110,15 +112,21 @@ value is 0.
 
 ## Recovery contract
 
-The driver never resets the board and has no internal frame timeout. The
-composition root (`src/main.cpp`) feeds the hardware watchdog **only after a
-frame has been read and published**, so:
+The driver never resets the board. Its only internal guard against a
+non-responsive sensor is `new_data_poll_limit` — a deliberately large ceiling
+on the new-data poll that exists so the loop cannot spin forever if the driver
+is reused without a watchdog. It is not a tuned timeout and callers should not
+treat it as one.
 
-- a transient `read_frame()` failure → the caller skips that loop iteration;
+In this firmware the real recovery is external: the composition root
+(`src/main.cpp`) feeds the hardware watchdog **only after a frame has been read
+and published**, so:
+
+- a transient `read_frame()` failure (`DataReadyTimeout` included) → the caller
+  skips that loop iteration and does not feed the watchdog;
 - frames stopping entirely → no watchdog feed → the board resets and re-runs
-  `init()` (which also re-runs I²C bus recovery).
-
-This is why the new-data poll in `get_frame_data()` is an unbounded `while`.
+  `init()` (which also re-runs I²C bus recovery), well before
+  `new_data_poll_limit` is reached.
 
 ## `Status`
 

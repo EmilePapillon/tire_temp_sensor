@@ -161,6 +161,15 @@ void test_read_frame_tolerates_status_register_readback_mismatch() {
     TEST_ASSERT_TRUE(bus->was_written(status_reg, status_clear_ready));
 }
 
+void test_read_frame_times_out_when_no_frame_ever_arrives() {
+    assert_status(Status::Success, sensor->init(test_config));
+    bus->registers[status_reg] = 0;  // new-data bit never sets
+    bus->reads.clear();
+
+    assert_status(Status::DataReadyTimeout, sensor->read_frame());
+    TEST_ASSERT_EQUAL_size_t(Sensor::new_data_poll_limit, bus->reads.size());
+}
+
 void test_read_frame_fails_when_new_data_flag_never_clears() {
     assert_status(Status::Success, sensor->init(test_config));
     // A device that keeps re-asserting "new data" no matter how often it is acknowledged.
@@ -295,6 +304,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
     RUN_TEST(test_read_frame_tolerates_status_register_readback_mismatch);
+    RUN_TEST(test_read_frame_times_out_when_no_frame_ever_arrives);
     RUN_TEST(test_read_frame_fails_when_new_data_flag_never_clears);
     RUN_TEST(test_read_frame_reports_bus_error);
     RUN_TEST(test_calculate_temps_reproduces_reference_frame);

@@ -26,6 +26,7 @@ enum class Status : uint8_t {
     NotAnMlx90641,                ///< EEPROM device-select bit not set.
     EepromCorrupt,                ///< Uncorrectable Hamming error in the EEPROM dump.
     CalibrationExtractionFailed,  ///< EEPROM parsed but produced no usable parameters.
+    DataReadyTimeout,             ///< The new-data flag never set within new_data_poll_limit status reads.
     FrameSyncFailed,              ///< The new-data flag never cleared across 5 acknowledgements.
 };
 
@@ -68,6 +69,14 @@ public:
     static constexpr std::size_t ee_data_size = eeprom_size;                   ///< Words in the EEPROM dump.
     static constexpr std::size_t frame_data_size = mlx90641::frame_data_size;  ///< Words in a raw frame.
 
+    /// @brief Hard ceiling on status-register reads while waiting for a new frame.
+    ///
+    /// Not a tuned timeout: a backstop so read_frame() cannot spin forever if the
+    /// sensor stops responding and the driver is used without an external
+    /// watchdog. At 400 kHz this is on the order of ten seconds; the slowest
+    /// (0.5 Hz) refresh rate still needs far fewer polls than this.
+    static constexpr uint32_t new_data_poll_limit = 50000;
+
     /// @brief Bind to a bus. Nothing is touched until init().
     /// @param i2c_adapter The bus adapter; must outlive this object.
     /// @param i2c_addr 7-bit I2C address of the sensor (0x33 by default on the part).
@@ -83,9 +92,11 @@ public:
 
     /// @brief Acquire the next frame (either sub-page) and its ambient temperature.
     ///
-    /// The wait for a new frame is unbounded; a stalled sensor is recovered by
-    /// the caller letting the watchdog reset the board, not by a status here.
-    /// @return Success, FrameSyncFailed, or a bus failure.
+    /// The wait for a new frame is bounded by new_data_poll_limit; exceeding it
+    /// returns DataReadyTimeout. That bound is only a safety net for reuse
+    /// outside a watchdogged context -- in this firmware a persistently stalled
+    /// sensor is recovered by the caller letting the watchdog reset the board.
+    /// @return Success, DataReadyTimeout, FrameSyncFailed, or a bus failure.
     Status read_frame();
 
     /// @brief Compute per-pixel object temperatures from the last frame read.
@@ -140,7 +151,7 @@ private:
     HammingResult hamming_decode();
 
     /// @brief Wait for, acknowledge and read one raw frame into frame_data_.
-    /// @return Success, FrameSyncFailed, or a bus failure.
+    /// @return Success, DataReadyTimeout, FrameSyncFailed, or a bus failure.
     Status get_frame_data();
 
     /// @brief Check the device-select bit and parse ee_data_ into calibration_parameters_.

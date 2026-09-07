@@ -16,6 +16,7 @@ inline const char* status_name(Status status) {
         case Status::NotAnMlx90641:               return "not an MLX90641";
         case Status::EepromCorrupt:               return "eeprom corrupt";
         case Status::CalibrationExtractionFailed: return "calibration extraction failed";
+        case Status::DataReadyTimeout:            return "data ready timeout";
         case Status::FrameSyncFailed:             return "frame sync failed";
     }
     return "?";
@@ -235,10 +236,14 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::get_frame_data() {
     uint8_t attempts = 0;
     I2cStatus i2c_status;
 
-    // Wait for the sensor to flag a new frame. Deliberately unbounded: if frames
-    // stop, loop() stops feeding the watchdog and the board resets into setup()
-    // (see config::watchdog_timeout_s). A bus error still returns at once.
-    while (data_ready == 0) {
+    // Wait for the sensor to flag a new frame. Bounded by new_data_poll_limit so
+    // a non-responsive sensor cannot spin here forever; that ceiling is a safety
+    // net, not a tuned timeout (the firmware's real recovery is the caller
+    // letting the watchdog reset the board). A bus error returns at once.
+    for (uint32_t polls = 0; data_ready == 0; ++polls) {
+        if (polls >= new_data_poll_limit) {
+            return Status::DataReadyTimeout;
+        }
         i2c_status = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
         if (i2c_status != I2cStatus::Success) {
             return from_i2c(i2c_status);
