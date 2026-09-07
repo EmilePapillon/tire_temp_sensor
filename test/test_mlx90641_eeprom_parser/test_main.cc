@@ -1,5 +1,6 @@
 #include <unity.h>
 #include <array>
+#include <cmath>
 #include "mlx90641_eeprom_parser.hh"
 #include "mlx90641_params.hh"
 #include "fixtures/mlx90641_eeprom_fixture.hh"
@@ -161,6 +162,67 @@ void test_broken_pixels() {
     }
 }
 
+void test_broken_pixels_lists_a_dead_pixel() {
+    MLX90641EEpromParser parser(eeprom_with_broken_pixels({100}));
+    const auto broken_pixels = parser.get_broken_pixels();
+    TEST_ASSERT_EQUAL_UINT16(100, broken_pixels[0]);
+    TEST_ASSERT_EQUAL_UINT16(no_broken_pixel, broken_pixels[1]);
+}
+
+void test_extract_all_accepts_one_broken_pixel() {
+    // The datasheet allows a part to ship with one; the driver corrects it.
+    ParamsMLX90641 params{};
+    TEST_ASSERT_TRUE(MLX90641EEpromParser(eeprom_with_broken_pixels({100})).extract_all(params));
+    TEST_ASSERT_EQUAL_UINT16(100, params.brokenPixels[0]);
+    TEST_ASSERT_EQUAL_UINT16(no_broken_pixel, params.brokenPixels[1]);
+}
+
+void test_extract_all_rejects_more_broken_pixels_than_can_be_corrected() {
+    // More broken pixels than slots: the scan must stop at the last slot rather
+    // than run past the end of the list, and the image must be rejected.
+    ParamsMLX90641 params{};
+    TEST_ASSERT_FALSE(MLX90641EEpromParser(eeprom_with_broken_pixels({10, 20, 30, 40, 50})).extract_all(params));
+    TEST_ASSERT_EQUAL_UINT16(10, params.brokenPixels[0]);
+    TEST_ASSERT_EQUAL_UINT16(20, params.brokenPixels[1]);
+}
+
+void test_scale_helpers_saturate_on_an_oversized_exponent() {
+    // A corrupt image can decode a scale exponent past the width of the shifted
+    // type; the helpers must saturate rather than shift out of range.
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, scale_by_division(1234, 200));
+    TEST_ASSERT_EQUAL_INT16(0, scale_by_multiplication(1234, 200));
+    // Exponents the EEPROM can legitimately carry are unaffected.
+    TEST_ASSERT_FLOAT_WITHIN(float_epsilon, 0.5f, scale_by_division(1024, 11));
+    TEST_ASSERT_EQUAL_INT16(4936, scale_by_multiplication(1234, 2));
+}
+
+void test_oversized_alpha_scale_yields_finite_alphas() {
+    // The saturated scale decodes to 83, past the 64 bits scale_by_division shifts.
+    MLX90641EEpromParser parser(eeprom_with_oversized_alpha_scale());
+    const auto alpha = parser.get_alpha();
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, alpha[0]);
+    for (const float value : alpha) {
+        TEST_ASSERT_TRUE(std::isfinite(value));
+    }
+}
+
+void test_alpha_scales_decode_with_their_bias() {
+    const auto scales = MLX90641EEpromParser(test_eeprom_data).get_alpha_scales();
+    for (const std::uint8_t scale : scales) {
+        // A healthy part stays inside the range the scale helpers can represent.
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT8(20, scale);
+        TEST_ASSERT_LESS_THAN_UINT8(max_shift_exp, scale);
+    }
+    TEST_ASSERT_EQUAL_UINT8(83, MLX90641EEpromParser(eeprom_with_oversized_alpha_scale()).get_alpha_scales()[0]);
+}
+
+void test_extract_all_rejects_an_oversized_alpha_scale() {
+    ParamsMLX90641 params{};
+    TEST_ASSERT_FALSE(MLX90641EEpromParser(eeprom_with_oversized_alpha_scale()).extract_all(params));
+    // The healthy fixture still passes, so the guard is not rejecting everything.
+    TEST_ASSERT_TRUE(MLX90641EEpromParser(test_eeprom_data).extract_all(params));
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_kv_ptat);
@@ -186,5 +248,12 @@ int main(int argc, char **argv) {
     RUN_TEST(test_ct);
     RUN_TEST(test_offset);
     RUN_TEST(test_broken_pixels);
+    RUN_TEST(test_broken_pixels_lists_a_dead_pixel);
+    RUN_TEST(test_extract_all_accepts_one_broken_pixel);
+    RUN_TEST(test_extract_all_rejects_more_broken_pixels_than_can_be_corrected);
+    RUN_TEST(test_scale_helpers_saturate_on_an_oversized_exponent);
+    RUN_TEST(test_oversized_alpha_scale_yields_finite_alphas);
+    RUN_TEST(test_alpha_scales_decode_with_their_bias);
+    RUN_TEST(test_extract_all_rejects_an_oversized_alpha_scale);
     return UNITY_END();
 }

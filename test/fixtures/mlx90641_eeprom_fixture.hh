@@ -1,6 +1,9 @@
 #pragma once
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include "mlx90641_eeprom_parser.hh"
 #include "mlx90641_params.hh"
 
 /// @file mlx90641_eeprom_fixture.hh
@@ -19,6 +22,18 @@ namespace mlx90641 {
 /// @param data11 An 11-bit payload.
 /// @return The 16-bit word with a zero Hamming syndrome.
 uint16_t hamming_encode(uint16_t data11);
+
+/// @brief Copy of the fixture image with the given pixels blanked out, as a part with dead pixels ships.
+///
+/// A pixel counts as broken when its offset, alpha and KTA words are all zero,
+/// which is what MLX90641EEpromParser::get_broken_pixels() looks for.
+/// @param pixels Row-major pixel indices to blank, 0..191.
+/// @return The image with those pixels zeroed; every other word is untouched.
+std::array<uint16_t, eeprom_size> eeprom_with_broken_pixels(std::initializer_list<std::size_t> pixels);
+
+/// @brief Copy of the fixture image with alpha_scale0's upper field saturated, as a corrupt image can read.
+/// @return The image whose first alpha row decodes to a shift of 83.
+std::array<uint16_t, eeprom_size> eeprom_with_oversized_alpha_scale();
 
 #include "fixtures/mlx90641_eeprom_fixture.inc"
 

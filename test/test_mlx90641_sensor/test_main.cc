@@ -6,9 +6,11 @@
 #include "fixtures/mlx90641_frame_fixture.hh"
 #include "mlx90641_driver.hh"
 #include "mocks/mock_i2c_adapter.hh"
+#include "mocks/mock_logger.hh"
 
 using namespace mlx90641;
 using Sensor = MLX90641Sensor<MockI2CAdapter>;
+using LoggingSensor = MLX90641Sensor<MockI2CAdapter, MockLogger>;
 
 constexpr uint8_t sensor_addr = 0x33;
 constexpr uint16_t status_reg = 0x8000;
@@ -24,6 +26,7 @@ MockI2CAdapter* bus = nullptr;
 Sensor* sensor = nullptr;
 
 void setUp(void) {
+    MockLogger::clear();
     bus = new MockI2CAdapter();
     bus->load_eeprom(test_eeprom_data);
     bus->registers[control_reg] = control_reg_initial;
@@ -111,6 +114,30 @@ void test_init_rejects_uncorrectable_eeprom_corruption() {
 void test_init_tolerates_a_correctable_eeprom_bit_flip() {
     bus->registers[eeprom_start_address + 100] ^= 0x0001;  // single flipped bit, Hamming-correctable
     assert_status(Status::Success, sensor->init(test_config));
+}
+
+void test_init_tolerates_a_broken_pixel_and_names_it() {
+    // The datasheet allows a part to ship with one dead pixel: init must warn
+    // with its index rather than refuse the sensor.
+    bus->load_eeprom(eeprom_with_broken_pixels({100}));
+    LoggingSensor logging_sensor(*bus, sensor_addr);
+
+    assert_status(Status::Success, logging_sensor.init(test_config));
+    TEST_ASSERT_TRUE(MockLogger::logged(LogLevel::WARN, "Broken pixel at index 100"));
+}
+
+void test_init_rejects_more_broken_pixels_than_can_be_corrected() {
+    bus->load_eeprom(eeprom_with_broken_pixels({100, 101}));
+    assert_status(Status::CalibrationExtractionFailed, sensor->init(test_config));
+}
+
+void test_init_rejects_an_out_of_range_alpha_scale() {
+    // Left to run, this part publishes NaN while read_frame() reports Success.
+    bus->load_eeprom(eeprom_with_oversized_alpha_scale());
+    LoggingSensor logging_sensor(*bus, sensor_addr);
+
+    assert_status(Status::CalibrationExtractionFailed, logging_sensor.init(test_config));
+    TEST_ASSERT_TRUE(MockLogger::logged(LogLevel::ERROR, "EEPROM is out of range"));
 }
 
 // ---------------------------------------------------------------- read_frame()
@@ -232,6 +259,36 @@ void test_calculate_temps_accepts_deployment_emissivity() {
     }
 }
 
+void test_calculate_temps_interpolates_a_broken_pixel() {
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const float healthy = sensor->get_temps()[100];
+
+    // The same frame, read through an EEPROM that reports pixel 100 as dead: its
+    // calibration is gone, so only the interpolation can produce a usable value.
+    bus->load_eeprom(eeprom_with_broken_pixels({100}));
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto temps = sensor->get_temps();
+
+    TEST_ASSERT_TRUE(std::isfinite(temps[100]));
+    TEST_ASSERT_FLOAT_WITHIN(1.5f, healthy, temps[100]);
+}
+
+void test_calculate_temps_interpolates_a_broken_pixel_in_the_last_column() {
+    // Pixel 191 is the last column of the last row. The correction must fall back
+    // on its left neighbour instead of reading past the end of the frame.
+    bus->load_eeprom(eeprom_with_broken_pixels({191}));
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto temps = sensor->get_temps();
+
+    TEST_ASSERT_EQUAL_FLOAT(temps[190], temps[191]);
+}
+
 // ---------------------------------------------------------------- helpers
 
 void test_column_averages_average_each_column_over_all_rows() {
@@ -268,6 +325,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_rejects_a_device_that_is_not_an_mlx90641);
     RUN_TEST(test_init_rejects_uncorrectable_eeprom_corruption);
     RUN_TEST(test_init_tolerates_a_correctable_eeprom_bit_flip);
+    RUN_TEST(test_init_tolerates_a_broken_pixel_and_names_it);
+    RUN_TEST(test_init_rejects_more_broken_pixels_than_can_be_corrected);
+    RUN_TEST(test_init_rejects_an_out_of_range_alpha_scale);
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
     RUN_TEST(test_read_frame_tolerates_status_register_readback_mismatch);
@@ -277,6 +337,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_calculate_temps_reproduces_reference_frame);
     RUN_TEST(test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0);
     RUN_TEST(test_calculate_temps_accepts_deployment_emissivity);
+    RUN_TEST(test_calculate_temps_interpolates_a_broken_pixel);
+    RUN_TEST(test_calculate_temps_interpolates_a_broken_pixel_in_the_last_column);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();
