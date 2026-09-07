@@ -31,7 +31,7 @@ struct ParamsMLX90641 {
     float cpAlpha;                                         ///< Compensation-pixel sensitivity.
     std::int16_t cpOffset;                                 ///< Compensation-pixel offset, LSB.
     float emissivityEE;                                    ///< Default emissivity, 0..1.
-    std::array<std::uint16_t, 2> brokenPixels;             ///< Indices of broken pixels; 65535 = none.
+    std::uint16_t deviatingPixel;                          ///< Index of the first EEPROM-flagged deviating pixel; 0xFFFF = none.
 };
 
 }  // namespace mlx90641

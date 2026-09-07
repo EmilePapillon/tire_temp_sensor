@@ -154,30 +154,21 @@ void test_offset() {
     }
 }
 
-void test_broken_pixels() {
-    const auto broken_pixels = eeprom->get_broken_pixels();
-    for (size_t i = 0; i < broken_pixels.size(); ++i) {
-        TEST_ASSERT_EQUAL(expected_params.brokenPixels[i], broken_pixels[i]);
-    }
+void test_find_deviating_pixel_returns_none_for_the_reference_sensor() {
+    TEST_ASSERT_EQUAL_UINT16(0xFFFF, eeprom->find_deviating_pixel());
 }
 
-void test_broken_pixel_scan_stops_at_two() {
-    // Three pixels with every per-pixel calibration word zeroed. The scan must
-    // record only the first two (broken_pixels has room for two) and must not
-    // write past the array while looking for a third.
+void test_find_deviating_pixel_flags_an_all_zero_pixel() {
+    // Zero every per-pixel calibration word for pixel 7: the EEPROM's way of
+    // flagging a dead pixel. It must be reported and must fail extract_all().
     auto data = test_eeprom_data;
-    constexpr std::array<uint16_t, 4> bases = {
-        EepromAddr::offset_even, EepromAddr::alpha_pixel, EepromAddr::kta_pixel, EepromAddr::offset_odd};
-    for (uint16_t pixel = 0; pixel < 3; ++pixel) {
-        for (const uint16_t base : bases) {
-            data[base - eeprom_start_address + pixel] = 0;
-        }
+    for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel,
+                                EepromAddr::kta_pixel, EepromAddr::offset_odd}) {
+        data[base - eeprom_start_address + 7] = 0;
     }
 
     MLX90641EEpromParser parser(data);
-    const auto broken = parser.get_broken_pixels();
-    TEST_ASSERT_EQUAL_UINT16(0, broken[0]);
-    TEST_ASSERT_EQUAL_UINT16(1, broken[1]);
+    TEST_ASSERT_EQUAL_UINT16(7, parser.find_deviating_pixel());
 
     ParamsMLX90641 params;
     TEST_ASSERT_FALSE(parser.extract_all(params));
@@ -218,8 +209,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_resolution_ee);
     RUN_TEST(test_ct);
     RUN_TEST(test_offset);
-    RUN_TEST(test_broken_pixels);
-    RUN_TEST(test_broken_pixel_scan_stops_at_two);
+    RUN_TEST(test_find_deviating_pixel_returns_none_for_the_reference_sensor);
+    RUN_TEST(test_find_deviating_pixel_flags_an_all_zero_pixel);
     RUN_TEST(test_scale_helpers_reject_oversized_exponents);
     return UNITY_END();
 }

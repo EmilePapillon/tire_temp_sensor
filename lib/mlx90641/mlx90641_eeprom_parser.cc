@@ -1,5 +1,4 @@
 #include "mlx90641_eeprom_parser.hh"
-#include <algorithm>
 
 namespace mlx90641 {
 
@@ -26,10 +25,10 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     params.cpOffset = get_cp_offset();
     params.cpKv = get_cp_kv();
     params.cpKta = get_cp_kta();
-    params.brokenPixels = get_broken_pixels();
+    params.deviatingPixel = find_deviating_pixel();
     // Zero tolerance: any deviating pixel fails calibration extraction, so the
     // driver never has to correct one at runtime.
-    if (params.brokenPixels[0] != 0xFFFF || params.brokenPixels[1] != 0xFFFF) {
+    if (params.deviatingPixel != 0xFFFF) {
         return false;
     }
     return true;
@@ -356,34 +355,29 @@ std::array<std::array<std::int16_t, 192>, 2> MLX90641EEpromParser::get_offset() 
     return offset;
 }
 
-std::array<std::uint16_t, 2> MLX90641EEpromParser::get_broken_pixels() const
+std::uint16_t MLX90641EEpromParser::find_deviating_pixel() const
 {
-    constexpr std::size_t pixel_count = 192u; // total number of pixels
-    std::array<std::uint16_t, 2> broken_pixels;
-    std::fill(broken_pixels.begin(), broken_pixels.end(), 0xFFFF);
-
-    std::size_t num_broken_pixels = 0u;
-    // broken_pixels holds two entries; extract_all() rejects the calibration once
-    // either is set, so recording the first two deviating pixels is enough.
-    for (std::size_t i = 0u; i < pixel_count && num_broken_pixels < broken_pixels.size(); ++i)
+    constexpr uint16_t pixel_count = 192u;
+    constexpr uint16_t bases[] = {EepromAddr::offset_even, EepromAddr::alpha_pixel,
+                                  EepromAddr::kta_pixel, EepromAddr::offset_odd};
+    for (uint16_t pixel = 0u; pixel < pixel_count; ++pixel)
     {
-        const uint16_t address1 = EepromAddr::offset_even + i;
-        const SingleEepromWord word1 = {address1, 0, 11, 0, false};
-        const uint16_t address2 = EepromAddr::alpha_pixel + i;
-        const SingleEepromWord word2 = {address2, 0, 11, 0, false};
-        const uint16_t address3 = EepromAddr::kta_pixel + i;
-        const SingleEepromWord word3 = {address3, 0, 11, 0, false};
-        const uint16_t address4 = EepromAddr::offset_odd + i;
-        const SingleEepromWord word4 = {address4, 0, 11, 0, false};
-        if (extract_param(word1) == 0 && extract_param(word2) == 0 &&
-            extract_param(word3) == 0 && extract_param(word4) == 0) 
+        bool all_zero = true;
+        for (const uint16_t base : bases)
         {
-        broken_pixels[num_broken_pixels] = i;
-        num_broken_pixels++; 
+            const SingleEepromWord word = {static_cast<uint16_t>(base + pixel), 0, 11, 0, false};
+            if (extract_param(word) != 0)
+            {
+                all_zero = false;
+                break;
+            }
+        }
+        if (all_zero)
+        {
+            return pixel;
         }
     }
-    
-    return broken_pixels;
+    return 0xFFFFu;
 }
 
 uint32_t MLX90641EEpromParser::extract_raw_field(const std::array<uint16_t, eeprom_size>& eeprom_data,

@@ -217,5 +217,5 @@ const ParamsMLX90641 expected_params = {
     .cpAlpha            = 3.60305e-08f,
     .cpOffset           = -480,
     .emissivityEE       = 1.0f,
-    .brokenPixels       = {65535, 65535}
+    .deviatingPixel     = 0xFFFF
 };
