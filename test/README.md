@@ -7,7 +7,7 @@ Run with `pio test -e native`. Everything under `lib/` is portable C++ and is ex
 ```
 test/
   test_<suite>/test_main.cc   one Unity binary per folder
-  mocks/                      MockWire, MockI2CAdapter, MockBlePeripheral (header-only)
+  mocks/                      MockWire, MockI2CAdapter, MockBlePeripheral, MockLogger (header-only)
   fixtures/                   EEPROM image + expected parameters, synthetic RAM frame + expected temperatures
 ```
 

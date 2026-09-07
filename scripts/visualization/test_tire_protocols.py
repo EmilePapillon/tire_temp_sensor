@@ -1,6 +1,6 @@
 """Unit tests for tire_protocols.py. Pure Python, no BLE stack needed:
 
-    python -m unittest discover -s scripts/vizualisation -p 'test_*.py'
+    python -m unittest discover -s scripts/visualization -p 'test_*.py'
 """
 import struct
 import unittest

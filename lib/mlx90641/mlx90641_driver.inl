@@ -318,7 +318,20 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::extract_parameters() {
     }
 
     if (!MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_)) {
+        log(LogLevel::ERROR, "EEPROM is out of range or reports more broken pixels than can be corrected");
         return Status::CalibrationExtractionFailed;
+    }
+
+    // The datasheet allows a part to ship with a dead pixel. Say which one, then
+    // carry on: calculate_temps() interpolates it from its row neighbours.
+    for (std::size_t slot = 0; slot < max_broken_pixels; slot++) {
+        const uint16_t broken = calibration_parameters_.brokenPixels[slot];
+        if (broken != no_broken_pixel) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "Broken pixel at index %u; it will be interpolated from its neighbours",
+                     static_cast<unsigned>(broken));
+            log(LogLevel::WARN, msg);
+        }
     }
 
     {
@@ -467,18 +480,19 @@ template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::bad_pixels_correction() {
     const auto& broken = calibration_parameters_.brokenPixels;
     float ap[2];
-    uint8_t pix = 0;
+    std::size_t pix = 0;
 
-    while (pix < broken.size() && broken[pix] < 65535) {
-        const uint16_t index = broken[pix];
-        const uint8_t line = index >> 5;
-        const uint8_t column = index - (line << 5);
+    // The frame is row-major and sensor_columns wide, so the interpolation
+    // neighbours below stay inside the broken pixel's own row.
+    while (pix < broken.size() && broken[pix] < num_pixels) {
+        const std::size_t index = broken[pix];
+        const std::size_t column = index % sensor_columns;
 
         if (column == 0) {
             temps_[index] = temps_[index + 1];
-        } else if (column == 1 || column == 14) {
+        } else if (column == 1 || column == sensor_columns - 2) {
             temps_[index] = (temps_[index - 1] + temps_[index + 1]) / 2.0f;
-        } else if (column == 15) {
+        } else if (column == sensor_columns - 1) {
             temps_[index] = temps_[index - 1];
         } else {
             ap[0] = temps_[index + 1] - temps_[index + 2];
