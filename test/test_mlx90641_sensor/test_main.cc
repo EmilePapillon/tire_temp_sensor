@@ -232,6 +232,29 @@ void test_calculate_temps_accepts_deployment_emissivity() {
     }
 }
 
+void test_calculate_temps_holds_last_value_on_a_corrupt_frame() {
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto good = sensor->get_temps();
+
+    // Zero the gain word: gain = gainEE / 0 -> inf, which poisons every pixel.
+    prime_frame(0);
+    bus->registers[static_cast<uint16_t>(0x0580 + (202 - 192))] = 0;
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto after = sensor->get_temps();
+
+    // Each pixel keeps its previous good value; nothing NaN/inf reaches the average.
+    for (std::size_t i = 0; i < num_pixels; i++) {
+        TEST_ASSERT_TRUE(std::isfinite(after[i]));
+        TEST_ASSERT_EQUAL_FLOAT(good[i], after[i]);
+    }
+    for (float avg : column_averages(after)) {
+        TEST_ASSERT_TRUE(std::isfinite(avg));
+    }
+}
+
 // ---------------------------------------------------------------- helpers
 
 void test_column_averages_average_each_column_over_all_rows() {
@@ -277,6 +300,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_calculate_temps_reproduces_reference_frame);
     RUN_TEST(test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0);
     RUN_TEST(test_calculate_temps_accepts_deployment_emissivity);
+    RUN_TEST(test_calculate_temps_holds_last_value_on_a_corrupt_frame);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();

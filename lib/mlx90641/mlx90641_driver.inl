@@ -436,7 +436,13 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_to(float emissivity, float 
                                     (1.0f + p.ksTo[range] * (to - p.ct[range]))) +
                          ta_tr)) -
              kelvin_offset;
-        temps_[pixel_number] = to;
+        // A zero divisor (e.g. a corrupt gain word) or a negative radicand makes
+        // this NaN/inf; an out-of-spec value means the frame or calibration is
+        // bad. Keep the previous frame's value for that pixel so a single glitch
+        // cannot poison column_averages() and the BLE publish.
+        if (std::isfinite(to) && to > pixel_temp_min_c && to < pixel_temp_max_c) {
+            temps_[pixel_number] = to;
+        }
     }
 }
 

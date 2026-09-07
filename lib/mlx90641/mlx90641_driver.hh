@@ -119,6 +119,8 @@ private:
     static constexpr uint16_t status_clear_new_data = 0x0030;   ///< Value written to acknowledge a frame.
     static constexpr uint8_t frame_sync_max_attempts = 5;       ///< Re-reads before FrameSyncFailed.
     static constexpr float kelvin_offset = 273.15f;             ///< Celsius to Kelvin.
+    static constexpr float pixel_temp_min_c = -40.0f;           ///< MLX90641 lower spec limit; a result below this is treated as a corrupt frame.
+    static constexpr float pixel_temp_max_c = 300.0f;           ///< MLX90641 upper spec limit; a result above this is treated as a corrupt frame.
 
     /// @brief Result of Hamming-checking the EEPROM dump.
     enum class HammingResult : uint8_t {
