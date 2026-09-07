@@ -313,6 +313,16 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::extract_parameters() {
     }
 
     if (!MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_)) {
+        const auto& broken = calibration_parameters_.brokenPixels;
+        if (broken[0] != 0xFFFF) {
+            char msg[64];
+            if (broken[1] != 0xFFFF) {
+                snprintf(msg, sizeof(msg), "EEPROM flags deviating pixels at index %u and %u", broken[0], broken[1]);
+            } else {
+                snprintf(msg, sizeof(msg), "EEPROM flags a deviating pixel at index %u", broken[0]);
+            }
+            log(LogLevel::ERROR, msg);
+        }
         return Status::CalibrationExtractionFailed;
     }
 

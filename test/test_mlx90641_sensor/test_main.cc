@@ -107,6 +107,16 @@ void test_init_rejects_uncorrectable_eeprom_corruption() {
     assert_status(Status::EepromCorrupt, sensor->init(test_config));
 }
 
+void test_init_rejects_a_sensor_with_a_deviating_pixel() {
+    // Zero every per-pixel calibration word for pixel 5: the EEPROM's way of
+    // flagging a dead pixel. extract_all() must fail closed rather than correct it.
+    for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel,
+                                EepromAddr::kta_pixel, EepromAddr::offset_odd}) {
+        bus->registers[base + 5] = 0;
+    }
+    assert_status(Status::CalibrationExtractionFailed, sensor->init(test_config));
+}
+
 void test_init_tolerates_a_correctable_eeprom_bit_flip() {
     bus->registers[eeprom_start_address + 100] ^= 0x0001;  // single flipped bit, Hamming-correctable
     assert_status(Status::Success, sensor->init(test_config));
@@ -280,6 +290,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_reports_bus_error);
     RUN_TEST(test_init_rejects_a_device_that_is_not_an_mlx90641);
     RUN_TEST(test_init_rejects_uncorrectable_eeprom_corruption);
+    RUN_TEST(test_init_rejects_a_sensor_with_a_deviating_pixel);
     RUN_TEST(test_init_tolerates_a_correctable_eeprom_bit_flip);
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
