@@ -47,7 +47,7 @@ inline std::array<float, sensor_columns> column_averages(const std::array<float,
 
 template <typename I2CAdapterT, typename LoggerT>
 MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, uint8_t i2c_addr)
-    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), data_ready_max_polls_(0), ambient_(0.0f), logger_() {
+    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), ambient_(0.0f), logger_() {
     temps_.fill(0.0f);
     ee_data_.fill(0);
     frame_data_.fill(0);
@@ -56,7 +56,6 @@ MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, u
 
 template <typename I2CAdapterT, typename LoggerT>
 Status MLX90641Sensor<I2CAdapterT, LoggerT>::init(const Mlx90641Config& config) {
-    data_ready_max_polls_ = config.data_ready_max_polls;
     log(LogLevel::DEBUG, "Starting MLX90641 sensor initialization");
 
     log(LogLevel::DEBUG, "Initializing I2C adapter");
@@ -115,7 +114,6 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::read_frame() {
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps() {
     calculate_to(get_emissivity(), ambient_);
-    bad_pixels_correction();
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -126,7 +124,6 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity) {
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity, float reflected_temperature_c) {
     calculate_to(emissivity, reflected_temperature_c);
-    bad_pixels_correction();
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -239,9 +236,11 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::get_frame_data() {
     uint8_t attempts = 0;
     I2cStatus i2c_status;
 
-    // Wait for the sensor to flag a new frame, bounded so a dead sensor cannot hang the caller.
-    for (uint32_t polls = 0; data_ready == 0; polls++) {
-        if (polls >= data_ready_max_polls_) {
+    // Wait for the sensor to flag a new frame. Bounded by new_data_poll_limit so
+    // a non-responsive sensor cannot spin here forever; that ceiling is a coarse
+    // backstop, not a tuned timeout. A bus error returns at once.
+    for (uint32_t polls = 0; data_ready == 0; ++polls) {
+        if (polls >= new_data_poll_limit) {
             return Status::DataReadyTimeout;
         }
         i2c_status = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
@@ -318,6 +317,12 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::extract_parameters() {
     }
 
     if (!MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_)) {
+        if (calibration_parameters_.deviatingPixel != 0xFFFF) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "EEPROM flags a deviating pixel at index %u",
+                     calibration_parameters_.deviatingPixel);
+            log(LogLevel::ERROR, msg);
+        }
         return Status::CalibrationExtractionFailed;
     }
 
@@ -436,7 +441,13 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_to(float emissivity, float 
                                     (1.0f + p.ksTo[range] * (to - p.ct[range]))) +
                          ta_tr)) -
              kelvin_offset;
-        temps_[pixel_number] = to;
+        // A zero divisor (e.g. a corrupt gain word) or a negative radicand makes
+        // this NaN/inf; an out-of-spec value means the frame or calibration is
+        // bad. Keep the previous frame's value for that pixel so a single glitch
+        // cannot poison column_averages() and the BLE publish.
+        if (std::isfinite(to) && to > pixel_temp_min_c && to < pixel_temp_max_c) {
+            temps_[pixel_number] = to;
+        }
     }
 }
 
@@ -461,37 +472,6 @@ float MLX90641Sensor<I2CAdapterT, LoggerT>::get_ta() const {
     float ta = (ptat_art / (1.0f + p.KvPTAT * (vdd - 3.3f)) - p.vPTAT25);
     ta = ta / p.KtPTAT + 25.0f;
     return ta;
-}
-
-template <typename I2CAdapterT, typename LoggerT>
-void MLX90641Sensor<I2CAdapterT, LoggerT>::bad_pixels_correction() {
-    const auto& broken = calibration_parameters_.brokenPixels;
-    float ap[2];
-    uint8_t pix = 0;
-
-    while (pix < broken.size() && broken[pix] < 65535) {
-        const uint16_t index = broken[pix];
-        const uint8_t line = index >> 5;
-        const uint8_t column = index - (line << 5);
-
-        if (column == 0) {
-            temps_[index] = temps_[index + 1];
-        } else if (column == 1 || column == 14) {
-            temps_[index] = (temps_[index - 1] + temps_[index + 1]) / 2.0f;
-        } else if (column == 15) {
-            temps_[index] = temps_[index - 1];
-        } else {
-            ap[0] = temps_[index + 1] - temps_[index + 2];
-            ap[1] = temps_[index - 1] - temps_[index - 2];
-            if (fabsf(ap[0]) > fabsf(ap[1])) {
-                temps_[index] = temps_[index - 1] + ap[1];
-            } else {
-                temps_[index] = temps_[index + 1] + ap[0];
-            }
-        }
-
-        pix = pix + 1;
-    }
 }
 
 template <typename I2CAdapterT, typename LoggerT>

@@ -35,7 +35,7 @@ constexpr WheelCorner wheel_corner = WheelCorner::FL;
 constexpr LogLevel log_level = LogLevel::INFO;
 /// Serial port baud rate.
 constexpr uint32_t serial_baud = 115200;
-/// Stream every raw 12x16 float frame over Serial for scripts/vizualisation/serial_viz.py.
+/// Stream every raw 12x16 float frame over Serial for scripts/visualization/serial_viz.py.
 /// A bench aid for calibration and physical positioning that bypasses BLE. The car build
 /// only uses BLE, and the 772-byte blocking UART write would pace loop() at ~11 Hz, so off.
 constexpr bool stream_frames_over_serial = false;
@@ -49,12 +49,11 @@ constexpr uint8_t mlx90641_i2c_addr = 0x33;
 /// Hz32/Hz64 (paired with a 7.5 ms connection interval in ble_peripheral below) to test
 /// end-to-end responsiveness at full throttle.
 constexpr mlx90641::RefreshRate mlx90641_refresh_rate = mlx90641::RefreshRate::Hz8;
-/// Bus speed, resolution, frame rate and polling limit programmed at init.
+/// Bus speed, resolution and frame rate programmed at init.
 constexpr mlx90641::Mlx90641Config mlx90641_config{
     400,                           // I2C bus frequency, kHz
     mlx90641::Resolution::Bits19,  // ADC resolution
     mlx90641_refresh_rate,         // frame rate
-    50000,                         // status-register polls before a frame read gives up (~5 s at 400 kHz)
 };
 /// Use the sensor's EEPROM emissivity unless a deployment-specific value is calibrated.
 constexpr bool mlx90641_use_eeprom_emissivity = false;
@@ -63,8 +62,6 @@ constexpr float mlx90641_emissivity = 0.95f;
 // calculate_to() divides by this value; a zero or out-of-range setting yields NaN/inf frames.
 static_assert(mlx90641_emissivity > 0.0f && mlx90641_emissivity <= 1.0f,
               "mlx90641_emissivity must be in (0, 1]");
-/// Frame read attempts per loop() before the iteration is skipped.
-constexpr uint8_t frame_read_max_retries = 5;
 
 // --- Battery -----------------------------------------------------------------
 
@@ -75,8 +72,9 @@ constexpr uint32_t battery_refresh_ms = 60000;
 
 /// Grace period before the radio starts; leaves time to attach a serial monitor.
 constexpr uint32_t boot_delay_ms = 5000;
-/// Hardware watchdog timeout: the board resets if loop() stalls longer than this.
-/// Must exceed boot_delay_ms and one full frame read (see data_ready_max_polls).
+/// Hardware watchdog timeout. loop() feeds it only after a frame has been read
+/// and published, so this is also the longest the sensor may stop producing
+/// frames before the board resets and re-runs setup(). Must exceed boot_delay_ms.
 constexpr uint32_t watchdog_timeout_s = 8;
 
 // --- BLE radio ---------------------------------------------------------------

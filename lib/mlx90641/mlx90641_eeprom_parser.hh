@@ -194,11 +194,14 @@ public:
     /// @return [sub-page][pixel] offsets in LSB.
     std::array<std::array<std::int16_t, 192>, 2> get_offset() const;
 
-    /// @brief Returns indices of broken pixels (max 2) that should be masked/ignored.
+    /// @brief Index of the first pixel the EEPROM flags as deviating.
     ///
-    /// Pixels are considered “broken” if all EEPROM offset values at their positions (across subpages) are zero.
-    /// @return Pixel indices; 65535 marks an unused slot.
-    std::array<std::uint16_t, 2> get_broken_pixels() const;
+    /// A pixel is flagged when all of its per-pixel calibration words (offset
+    /// sub-page 0/1, alpha, kta) are zero. Any such pixel fails extract_all();
+    /// the firmware does not correct deviating pixels, so the first one is all
+    /// the caller needs.
+    /// @return Row-major pixel index 0..191, or 0xFFFF if there is none.
+    std::uint16_t find_deviating_pixel() const;
 
 
 private:

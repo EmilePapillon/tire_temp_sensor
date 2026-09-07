@@ -26,13 +26,13 @@ enum class Status : uint8_t {
     NotAnMlx90641,                ///< EEPROM device-select bit not set.
     EepromCorrupt,                ///< Uncorrectable Hamming error in the EEPROM dump.
     CalibrationExtractionFailed,  ///< EEPROM parsed but produced no usable parameters.
-    DataReadyTimeout,             ///< No new frame within Mlx90641Config::data_ready_max_polls.
+    DataReadyTimeout,             ///< The new-data flag never set within new_data_poll_limit status reads.
     FrameSyncFailed,              ///< The new-data flag never cleared across 5 acknowledgements.
 };
 
 /// @brief Human-readable name of a driver status, for log messages.
 /// @param status The status to name.
-/// @return A static lower-case string such as "data ready timeout"; never null.
+/// @return A static lower-case string such as "frame sync failed"; never null.
 const char* status_name(Status status);
 
 /// @brief Lift a bus status into the driver's status space.
@@ -43,7 +43,7 @@ Status from_i2c(I2cStatus status);
 constexpr std::size_t sensor_columns = 16;                            ///< Pixels across the tread.
 constexpr std::size_t sensor_rows = 12;                               ///< Pixels along the tread.
 constexpr std::size_t num_pixels = sensor_columns * sensor_rows;      ///< Pixels per frame.
-constexpr std::size_t frame_data_size = 834;                          ///< Words in a raw RAM frame + 2 status words.
+constexpr std::size_t frame_data_size = 242;                          ///< 192 pixel/aux words + [240] control reg 1 + [241] sub-page.
 
 /// @brief Average each of the 16 columns over the 12 rows of a row-major frame.
 /// @param temps Per-pixel temperatures, row-major, index = row * 16 + column.
@@ -69,6 +69,13 @@ public:
     static constexpr std::size_t ee_data_size = eeprom_size;                   ///< Words in the EEPROM dump.
     static constexpr std::size_t frame_data_size = mlx90641::frame_data_size;  ///< Words in a raw frame.
 
+    /// @brief Hard ceiling on status-register reads while waiting for a new frame.
+    ///
+    /// Not a tuned timeout: a coarse backstop so read_frame() cannot spin forever
+    /// on a sensor that has stopped responding. At 400 kHz it is on the order of
+    /// ten seconds; even the slowest (0.5 Hz) refresh rate needs far fewer polls.
+    static constexpr uint32_t new_data_poll_limit = 50000;
+
     /// @brief Bind to a bus. Nothing is touched until init().
     /// @param i2c_adapter The bus adapter; must outlive this object.
     /// @param i2c_addr 7-bit I2C address of the sensor (0x33 by default on the part).
@@ -78,11 +85,15 @@ public:
     ///
     /// Failing to program the resolution or refresh rate is logged as a warning
     /// but does not fail init: the sensor still produces frames at its defaults.
-    /// @param config Bus speed, resolution, refresh rate and polling limit.
+    /// @param config Bus speed, ADC resolution and refresh rate.
     /// @return Success, or the first fatal failure.
     Status init(const Mlx90641Config& config);
 
     /// @brief Acquire the next frame (either sub-page) and its ambient temperature.
+    ///
+    /// The wait for a new frame is bounded by new_data_poll_limit; exceeding it
+    /// returns DataReadyTimeout. The caller decides how to handle that (retry,
+    /// re-init, reset); the driver takes no recovery action of its own.
     /// @return Success, DataReadyTimeout, FrameSyncFailed, or a bus failure.
     Status read_frame();
 
@@ -119,6 +130,8 @@ private:
     static constexpr uint16_t status_clear_new_data = 0x0030;   ///< Value written to acknowledge a frame.
     static constexpr uint8_t frame_sync_max_attempts = 5;       ///< Re-reads before FrameSyncFailed.
     static constexpr float kelvin_offset = 273.15f;             ///< Celsius to Kelvin.
+    static constexpr float pixel_temp_min_c = -40.0f;           ///< MLX90641 lower spec limit; a result below this is treated as a corrupt frame.
+    static constexpr float pixel_temp_max_c = 300.0f;           ///< MLX90641 upper spec limit; a result above this is treated as a corrupt frame.
 
     /// @brief Result of Hamming-checking the EEPROM dump.
     enum class HammingResult : uint8_t {
@@ -166,9 +179,6 @@ private:
     /// @return Degrees Celsius.
     float get_ta() const;
 
-    /// @brief Replace the (at most two) EEPROM-flagged broken pixels by interpolating their neighbours.
-    void bad_pixels_correction();
-
     /// @brief Emissivity stored in the EEPROM.
     /// @return Emissivity, 0..1.
     float get_emissivity() const;
@@ -189,7 +199,6 @@ private:
 
     I2CAdapterT& i2c_;                                   ///< The injected bus adapter.
     uint8_t i2c_addr_;                                   ///< Sensor address on the bus.
-    uint32_t data_ready_max_polls_;                      ///< From Mlx90641Config, set in init().
     std::array<uint16_t, ee_data_size> ee_data_;         ///< Hamming-decoded EEPROM image.
     std::array<uint16_t, frame_data_size> frame_data_;   ///< Last raw frame; [240] control reg 1, [241] sub-page.
     std::array<float, num_pixels> temps_;                ///< Output of calculate_temps().

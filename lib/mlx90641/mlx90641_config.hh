@@ -33,10 +33,6 @@ struct Mlx90641Config {
     uint32_t i2c_freq_khz;      ///< I2C bus frequency in kHz.
     Resolution resolution;      ///< ADC resolution to program.
     RefreshRate refresh_rate;   ///< Frame rate to program.
-    /// Status-register reads to wait for a new frame before read_frame() gives
-    /// up with Status::DataReadyTimeout. Each poll is one 1-word I2C read
-    /// (~100 us at 400 kHz); size it to cover the configured frame period.
-    uint32_t data_ready_max_polls;
 };
 
 }  // namespace mlx90641

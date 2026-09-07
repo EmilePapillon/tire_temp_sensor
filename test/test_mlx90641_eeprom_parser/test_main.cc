@@ -154,11 +154,35 @@ void test_offset() {
     }
 }
 
-void test_broken_pixels() {
-    const auto broken_pixels = eeprom->get_broken_pixels();
-    for (size_t i = 0; i < broken_pixels.size(); ++i) {
-        TEST_ASSERT_EQUAL(expected_params.brokenPixels[i], broken_pixels[i]);
+void test_find_deviating_pixel_returns_none_for_the_reference_sensor() {
+    TEST_ASSERT_EQUAL_UINT16(0xFFFF, eeprom->find_deviating_pixel());
+}
+
+void test_find_deviating_pixel_flags_an_all_zero_pixel() {
+    // Zero every per-pixel calibration word for pixel 7: the EEPROM's way of
+    // flagging a dead pixel. It must be reported and must fail extract_all().
+    auto data = test_eeprom_data;
+    for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel,
+                                EepromAddr::kta_pixel, EepromAddr::offset_odd}) {
+        data[base - eeprom_start_address + 7] = 0;
     }
+
+    MLX90641EEpromParser parser(data);
+    TEST_ASSERT_EQUAL_UINT16(7, parser.find_deviating_pixel());
+
+    ParamsMLX90641 params;
+    TEST_ASSERT_FALSE(parser.extract_all(params));
+}
+
+void test_scale_helpers_reject_oversized_exponents() {
+    // Valid range is unaffected.
+    TEST_ASSERT_EQUAL_FLOAT(0.25f, scale_by_division(1, 2));
+    TEST_ASSERT_EQUAL_INT16(8, scale_by_multiplication(1, 3));
+    // A corrupt scale field must not trigger a shift wider than the type.
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, scale_by_division(12345, 64));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, scale_by_division(12345, 200));
+    TEST_ASSERT_EQUAL_INT16(0, scale_by_multiplication(123, 31));
+    TEST_ASSERT_EQUAL_INT16(0, scale_by_multiplication(123, 200));
 }
 
 int main(int argc, char **argv) {
@@ -185,6 +209,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_resolution_ee);
     RUN_TEST(test_ct);
     RUN_TEST(test_offset);
-    RUN_TEST(test_broken_pixels);
+    RUN_TEST(test_find_deviating_pixel_returns_none_for_the_reference_sensor);
+    RUN_TEST(test_find_deviating_pixel_flags_an_all_zero_pixel);
+    RUN_TEST(test_scale_helpers_reject_oversized_exponents);
     return UNITY_END();
 }

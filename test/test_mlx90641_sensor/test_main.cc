@@ -16,9 +16,8 @@ constexpr uint16_t control_reg = 0x800D;
 constexpr uint16_t control_reg_initial = 0x0901;  // resolution 2, refresh 2, plus unrelated bits
 constexpr uint16_t status_data_ready = 0x0008;
 constexpr uint16_t status_clear_ready = 0x0030;
-constexpr uint32_t test_max_polls = 1000;
 
-const Mlx90641Config test_config{400, Resolution::Bits19, RefreshRate::Hz32, test_max_polls};
+const Mlx90641Config test_config{400, Resolution::Bits19, RefreshRate::Hz32};
 
 MockI2CAdapter* bus = nullptr;
 Sensor* sensor = nullptr;
@@ -83,7 +82,7 @@ void test_init_applies_config_to_bus_and_control_register() {
 }
 
 void test_init_has_no_hidden_defaults() {
-    const Mlx90641Config other{100, Resolution::Bits16, RefreshRate::Hz1, test_max_polls};
+    const Mlx90641Config other{100, Resolution::Bits16, RefreshRate::Hz1};
     assert_status(Status::Success, sensor->init(other));
 
     TEST_ASSERT_EQUAL_UINT32(100u, bus->init_freq_khz);
@@ -106,6 +105,16 @@ void test_init_rejects_a_device_that_is_not_an_mlx90641() {
 void test_init_rejects_uncorrectable_eeprom_corruption() {
     bus->registers[eeprom_start_address + 100] ^= 0x0003;  // two flipped bits
     assert_status(Status::EepromCorrupt, sensor->init(test_config));
+}
+
+void test_init_rejects_a_sensor_with_a_deviating_pixel() {
+    // Zero every per-pixel calibration word for pixel 5: the EEPROM's way of
+    // flagging a dead pixel. extract_all() must fail closed rather than correct it.
+    for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel,
+                                EepromAddr::kta_pixel, EepromAddr::offset_odd}) {
+        bus->registers[base + 5] = 0;
+    }
+    assert_status(Status::CalibrationExtractionFailed, sensor->init(test_config));
 }
 
 void test_init_tolerates_a_correctable_eeprom_bit_flip() {
@@ -154,11 +163,11 @@ void test_read_frame_tolerates_status_register_readback_mismatch() {
 
 void test_read_frame_times_out_when_no_frame_ever_arrives() {
     assert_status(Status::Success, sensor->init(test_config));
-    bus->registers[status_reg] = 0;  // never ready
+    bus->registers[status_reg] = 0;  // new-data bit never sets
     bus->reads.clear();
 
     assert_status(Status::DataReadyTimeout, sensor->read_frame());
-    TEST_ASSERT_EQUAL_size_t(test_max_polls, bus->reads.size());
+    TEST_ASSERT_EQUAL_size_t(Sensor::new_data_poll_limit, bus->reads.size());
 }
 
 void test_read_frame_fails_when_new_data_flag_never_clears() {
@@ -232,6 +241,29 @@ void test_calculate_temps_accepts_deployment_emissivity() {
     }
 }
 
+void test_calculate_temps_holds_last_value_on_a_corrupt_frame() {
+    prime_frame(0);
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto good = sensor->get_temps();
+
+    // Zero the gain word: gain = gainEE / 0 -> inf, which poisons every pixel.
+    prime_frame(0);
+    bus->registers[static_cast<uint16_t>(0x0580 + (202 - 192))] = 0;
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto after = sensor->get_temps();
+
+    // Each pixel keeps its previous good value; nothing NaN/inf reaches the average.
+    for (std::size_t i = 0; i < num_pixels; i++) {
+        TEST_ASSERT_TRUE(std::isfinite(after[i]));
+        TEST_ASSERT_EQUAL_FLOAT(good[i], after[i]);
+    }
+    for (float avg : column_averages(after)) {
+        TEST_ASSERT_TRUE(std::isfinite(avg));
+    }
+}
+
 // ---------------------------------------------------------------- helpers
 
 void test_column_averages_average_each_column_over_all_rows() {
@@ -267,6 +299,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_reports_bus_error);
     RUN_TEST(test_init_rejects_a_device_that_is_not_an_mlx90641);
     RUN_TEST(test_init_rejects_uncorrectable_eeprom_corruption);
+    RUN_TEST(test_init_rejects_a_sensor_with_a_deviating_pixel);
     RUN_TEST(test_init_tolerates_a_correctable_eeprom_bit_flip);
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
@@ -277,6 +310,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_calculate_temps_reproduces_reference_frame);
     RUN_TEST(test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0);
     RUN_TEST(test_calculate_temps_accepts_deployment_emissivity);
+    RUN_TEST(test_calculate_temps_holds_last_value_on_a_corrupt_frame);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();

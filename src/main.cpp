@@ -61,24 +61,6 @@ void refresh_battery() {
     telemetry.battery_pct = battery_lipo_percent(telemetry.battery_mv);
 }
 
-/// @brief Read one frame, retrying up to config::frame_read_max_retries times.
-/// @return True if a frame was acquired.
-bool read_frame_with_retries() {
-    for (uint8_t attempt = 1; attempt <= config::frame_read_max_retries; attempt++) {
-        watchdog_feed();  // a frame read may legitimately take several seconds to time out
-        const mlx90641::Status status = mlx_sensor.read_frame();
-        if (status == mlx90641::Status::Success) {
-            return true;
-        }
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Frame read failed (%s), retry %u/%u", mlx90641::status_name(status), attempt,
-                 config::frame_read_max_retries);
-        logger.log(LogLevel::DEBUG, msg);
-        delay(1);
-    }
-    return false;
-}
-
 /// @brief Log the reason and stop feeding the watchdog: the board resets itself.
 /// @param reason Message logged at ERROR level.
 void halt(const char* reason) {
@@ -146,13 +128,19 @@ void setup() {
 }
 
 /// @brief Arduino main loop: one frame in, one telemetry sample out.
+///
+/// The watchdog is fed only once a frame has been read and published, so a
+/// single missed frame just skips the iteration while sustained frame loss
+/// lets the board reset into setup() (see config::watchdog_timeout_s).
 void loop() {
-    watchdog_feed();
-
     logger.log(LogLevel::DEBUG, "Attempting to read frame...");
-    if (!read_frame_with_retries()) {
-        logger.log(LogLevel::ERROR, "Missed frame, all retries failed. Skipping notification.");
-        return;
+    const mlx90641::Status status = mlx_sensor.read_frame();
+    if (status != mlx90641::Status::Success) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Missed frame (%s); skipping. Board resets if frames stop.",
+                 mlx90641::status_name(status));
+        logger.log(LogLevel::WARN, msg);
+        return;  // no watchdog_feed()
     }
 
     if (config::mlx90641_use_eeprom_emissivity) {
@@ -171,4 +159,6 @@ void loop() {
 
     ble_protocol.poll();
     ble_protocol.publish(telemetry);
+
+    watchdog_feed();  // proof of life: a frame was read and published this iteration
 }
