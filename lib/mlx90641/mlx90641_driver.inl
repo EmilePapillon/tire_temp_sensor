@@ -16,7 +16,6 @@ inline const char* status_name(Status status) {
         case Status::NotAnMlx90641:               return "not an MLX90641";
         case Status::EepromCorrupt:               return "eeprom corrupt";
         case Status::CalibrationExtractionFailed: return "calibration extraction failed";
-        case Status::DataReadyTimeout:            return "data ready timeout";
         case Status::FrameSyncFailed:             return "frame sync failed";
     }
     return "?";
@@ -47,7 +46,7 @@ inline std::array<float, sensor_columns> column_averages(const std::array<float,
 
 template <typename I2CAdapterT, typename LoggerT>
 MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, uint8_t i2c_addr)
-    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), data_ready_max_polls_(0), ambient_(0.0f), logger_() {
+    : i2c_(i2c_adapter), i2c_addr_(i2c_addr), ambient_(0.0f), logger_() {
     temps_.fill(0.0f);
     ee_data_.fill(0);
     frame_data_.fill(0);
@@ -56,7 +55,6 @@ MLX90641Sensor<I2CAdapterT, LoggerT>::MLX90641Sensor(I2CAdapterT& i2c_adapter, u
 
 template <typename I2CAdapterT, typename LoggerT>
 Status MLX90641Sensor<I2CAdapterT, LoggerT>::init(const Mlx90641Config& config) {
-    data_ready_max_polls_ = config.data_ready_max_polls;
     log(LogLevel::DEBUG, "Starting MLX90641 sensor initialization");
 
     log(LogLevel::DEBUG, "Initializing I2C adapter");
@@ -237,11 +235,10 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::get_frame_data() {
     uint8_t attempts = 0;
     I2cStatus i2c_status;
 
-    // Wait for the sensor to flag a new frame, bounded so a dead sensor cannot hang the caller.
-    for (uint32_t polls = 0; data_ready == 0; polls++) {
-        if (polls >= data_ready_max_polls_) {
-            return Status::DataReadyTimeout;
-        }
+    // Wait for the sensor to flag a new frame. Deliberately unbounded: if frames
+    // stop, loop() stops feeding the watchdog and the board resets into setup()
+    // (see config::watchdog_timeout_s). A bus error still returns at once.
+    while (data_ready == 0) {
         i2c_status = i2c_.read(i2c_addr_, status_register, 1, &status_register_value);
         if (i2c_status != I2cStatus::Success) {
             return from_i2c(i2c_status);

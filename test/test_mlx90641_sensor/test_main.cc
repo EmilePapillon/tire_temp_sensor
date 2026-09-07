@@ -16,9 +16,8 @@ constexpr uint16_t control_reg = 0x800D;
 constexpr uint16_t control_reg_initial = 0x0901;  // resolution 2, refresh 2, plus unrelated bits
 constexpr uint16_t status_data_ready = 0x0008;
 constexpr uint16_t status_clear_ready = 0x0030;
-constexpr uint32_t test_max_polls = 1000;
 
-const Mlx90641Config test_config{400, Resolution::Bits19, RefreshRate::Hz32, test_max_polls};
+const Mlx90641Config test_config{400, Resolution::Bits19, RefreshRate::Hz32};
 
 MockI2CAdapter* bus = nullptr;
 Sensor* sensor = nullptr;
@@ -83,7 +82,7 @@ void test_init_applies_config_to_bus_and_control_register() {
 }
 
 void test_init_has_no_hidden_defaults() {
-    const Mlx90641Config other{100, Resolution::Bits16, RefreshRate::Hz1, test_max_polls};
+    const Mlx90641Config other{100, Resolution::Bits16, RefreshRate::Hz1};
     assert_status(Status::Success, sensor->init(other));
 
     TEST_ASSERT_EQUAL_UINT32(100u, bus->init_freq_khz);
@@ -150,15 +149,6 @@ void test_read_frame_tolerates_status_register_readback_mismatch() {
 
     assert_status(Status::Success, sensor->read_frame());
     TEST_ASSERT_TRUE(bus->was_written(status_reg, status_clear_ready));
-}
-
-void test_read_frame_times_out_when_no_frame_ever_arrives() {
-    assert_status(Status::Success, sensor->init(test_config));
-    bus->registers[status_reg] = 0;  // never ready
-    bus->reads.clear();
-
-    assert_status(Status::DataReadyTimeout, sensor->read_frame());
-    TEST_ASSERT_EQUAL_size_t(test_max_polls, bus->reads.size());
 }
 
 void test_read_frame_fails_when_new_data_flag_never_clears() {
@@ -294,7 +284,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
     RUN_TEST(test_read_frame_tolerates_status_register_readback_mismatch);
-    RUN_TEST(test_read_frame_times_out_when_no_frame_ever_arrives);
     RUN_TEST(test_read_frame_fails_when_new_data_flag_never_clears);
     RUN_TEST(test_read_frame_reports_bus_error);
     RUN_TEST(test_calculate_temps_reproduces_reference_frame);

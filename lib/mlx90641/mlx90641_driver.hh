@@ -26,7 +26,6 @@ enum class Status : uint8_t {
     NotAnMlx90641,                ///< EEPROM device-select bit not set.
     EepromCorrupt,                ///< Uncorrectable Hamming error in the EEPROM dump.
     CalibrationExtractionFailed,  ///< EEPROM parsed but produced no usable parameters.
-    DataReadyTimeout,             ///< No new frame within Mlx90641Config::data_ready_max_polls.
     FrameSyncFailed,              ///< The new-data flag never cleared across 5 acknowledgements.
 };
 
@@ -83,7 +82,10 @@ public:
     Status init(const Mlx90641Config& config);
 
     /// @brief Acquire the next frame (either sub-page) and its ambient temperature.
-    /// @return Success, DataReadyTimeout, FrameSyncFailed, or a bus failure.
+    ///
+    /// The wait for a new frame is unbounded; a stalled sensor is recovered by
+    /// the caller letting the watchdog reset the board, not by a status here.
+    /// @return Success, FrameSyncFailed, or a bus failure.
     Status read_frame();
 
     /// @brief Compute per-pixel object temperatures from the last frame read.
@@ -138,7 +140,7 @@ private:
     HammingResult hamming_decode();
 
     /// @brief Wait for, acknowledge and read one raw frame into frame_data_.
-    /// @return Success, DataReadyTimeout, FrameSyncFailed, or a bus failure.
+    /// @return Success, FrameSyncFailed, or a bus failure.
     Status get_frame_data();
 
     /// @brief Check the device-select bit and parse ee_data_ into calibration_parameters_.
@@ -188,7 +190,6 @@ private:
 
     I2CAdapterT& i2c_;                                   ///< The injected bus adapter.
     uint8_t i2c_addr_;                                   ///< Sensor address on the bus.
-    uint32_t data_ready_max_polls_;                      ///< From Mlx90641Config, set in init().
     std::array<uint16_t, ee_data_size> ee_data_;         ///< Hamming-decoded EEPROM image.
     std::array<uint16_t, frame_data_size> frame_data_;   ///< Last raw frame; [240] control reg 1, [241] sub-page.
     std::array<float, num_pixels> temps_;                ///< Output of calculate_temps().
