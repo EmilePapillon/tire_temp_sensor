@@ -49,12 +49,27 @@ constexpr uint8_t mlx90641_i2c_addr = 0x33;
 /// Hz32/Hz64 (paired with a 7.5 ms connection interval in ble_peripheral below) to test
 /// end-to-end responsiveness at full throttle.
 constexpr mlx90641::RefreshRate mlx90641_refresh_rate = mlx90641::RefreshRate::Hz8;
+/// Wall-clock cost of one data-ready poll (a 1-word status-register read) on this board.
+/// Bench-measured at 266 us on the Feather nRF52832 at 400 kHz (2026-09-06), rounded down.
+/// A ballpark is all that is needed: the timeout below tolerates a 3x error before a healthy
+/// frame could ever time out, and loop() halts on repeated failures whichever way it is off.
+/// Re-measure after changing the bus speed, the board or the Arduino core: time 1000
+/// I2CAdapter::read(0x8000, 1 word) calls with micros() in setup().
+constexpr uint32_t mlx90641_poll_cost_us = 250;
+/// Frame periods to wait before a frame read gives up. A fresh wait can span one full period
+/// plus jitter, so at least 2; 3 leaves the poll-cost estimate room to be wrong.
+constexpr uint32_t mlx90641_data_ready_periods = 3;
+/// Nominal wall-clock of one frame-read timeout, derived from the refresh rate.
+constexpr uint32_t mlx90641_data_ready_timeout_us =
+    mlx90641_data_ready_periods * mlx90641::frame_period_us(mlx90641_refresh_rate);
+/// The timeout in the unit the driver counts: status-register polls.
+constexpr uint32_t mlx90641_data_ready_max_polls = mlx90641_data_ready_timeout_us / mlx90641_poll_cost_us;
 /// Bus speed, resolution, frame rate and polling limit programmed at init.
 constexpr mlx90641::Mlx90641Config mlx90641_config{
     400,                           // I2C bus frequency, kHz
     mlx90641::Resolution::Bits19,  // ADC resolution
     mlx90641_refresh_rate,         // frame rate
-    50000,                         // status-register polls before a frame read gives up (~5 s at 400 kHz)
+    mlx90641_data_ready_max_polls, // status-register polls before a frame read gives up
 };
 /// Use the sensor's EEPROM emissivity unless a deployment-specific value is calibrated.
 constexpr bool mlx90641_use_eeprom_emissivity = false;
@@ -65,6 +80,10 @@ static_assert(mlx90641_emissivity > 0.0f && mlx90641_emissivity <= 1.0f,
               "mlx90641_emissivity must be in (0, 1]");
 /// Frame read attempts per loop() before the iteration is skipped.
 constexpr uint8_t frame_read_max_retries = 5;
+/// Consecutive loop() iterations without a frame before the board stops feeding the watchdog
+/// and lets it reset. Each iteration already retries frame_read_max_retries times, so at Hz8
+/// this is ~6 s of a silent sensor, followed by the watchdog timeout.
+constexpr uint8_t max_consecutive_missed_frames = 3;
 
 // --- Battery -----------------------------------------------------------------
 
@@ -75,9 +94,15 @@ constexpr uint32_t battery_refresh_ms = 60000;
 
 /// Grace period before the radio starts; leaves time to attach a serial monitor.
 constexpr uint32_t boot_delay_ms = 5000;
-/// Hardware watchdog timeout: the board resets if loop() stalls longer than this.
-/// Must exceed boot_delay_ms and one full frame read (see data_ready_max_polls).
+/// Hardware watchdog timeout: the board resets if the firmware stops feeding it for this long.
+/// It is the backstop for the firmware itself hanging, not the detector of sensor faults:
+/// every fault the firmware can observe ends in halt(), which stops feeding it deliberately.
 constexpr uint32_t watchdog_timeout_s = 8;
+// The watchdog is fed once per frame-read attempt and once around the boot delay, so each of
+// those must complete inside its window or the reset happens before the fault can be logged.
+static_assert(mlx90641_data_ready_timeout_us < watchdog_timeout_s * 1000000u,
+              "one frame-read timeout must complete inside the watchdog window");
+static_assert(boot_delay_ms < watchdog_timeout_s * 1000u, "the boot delay must complete inside the watchdog window");
 
 // --- BLE radio ---------------------------------------------------------------
 

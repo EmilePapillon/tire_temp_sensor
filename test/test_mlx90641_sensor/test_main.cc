@@ -298,6 +298,14 @@ void test_column_averages_average_each_column_over_all_rows() {
     }
 }
 
+void test_frame_period_halves_with_each_refresh_rate_step() {
+    // config.hh sizes the data-ready poll bound from this, so the slowest and
+    // fastest settings must come out exact, not rounded.
+    TEST_ASSERT_EQUAL_UINT32(2000000u, frame_period_us(RefreshRate::Hz0_5));
+    TEST_ASSERT_EQUAL_UINT32(125000u, frame_period_us(RefreshRate::Hz8));
+    TEST_ASSERT_EQUAL_UINT32(15625u, frame_period_us(RefreshRate::Hz64));
+}
+
 void test_hamming_encode_round_trips_through_the_fixture() {
     // Every decoded fixture word, re-encoded, must carry a zero syndrome, or
     // the mock bus would not be a faithful sensor.
@@ -330,6 +338,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_calculate_temps_interpolates_a_broken_pixel);
     RUN_TEST(test_calculate_temps_interpolates_a_broken_pixel_in_the_last_column);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
+    RUN_TEST(test_frame_period_halves_with_each_refresh_rate_step);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();
 }

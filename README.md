@@ -49,13 +49,16 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 | `stream_frames_over_serial` | `false` | Raw frames for `serial_viz.py` (bench aid for calibration and positioning); its blocking UART write paces `loop()` at ~11 Hz, so off for the car |
 | `mlx90641_i2c_addr` | `0x33` | |
 | `mlx90641_refresh_rate` | `Hz8` | Sensor frame rate; `loop()` and the BLE publish rate follow it. `Hz32`/`Hz64` for full-throttle tests |
-| `mlx90641_config` | 400 kHz, 19-bit, `mlx90641_refresh_rate`, 50 000 polls | Bus speed, ADC resolution, frame rate, data-ready poll limit |
+| `mlx90641_config` | 400 kHz, 19-bit, `mlx90641_refresh_rate`, derived poll limit | Bus speed, ADC resolution, frame rate, data-ready poll limit |
+| `mlx90641_poll_cost_us` | 250 | Bench-measured cost of one data-ready poll; converts the timeout below into the polls the driver counts. Re-measure after changing bus speed, board or core |
+| `mlx90641_data_ready_periods` | 3 | Frame periods a frame read waits before giving up (~375 ms at `Hz8`) |
 | `mlx90641_use_eeprom_emissivity` | `true` | Use the sensor-stored emissivity; set `false` to use the deployment-calibrated override |
 | `mlx90641_emissivity` | `1.0` | Effective tire-surface emissivity when the EEPROM value is overridden; calibrate this for the tire/finish |
 | `frame_read_max_retries` | 5 | Per `loop()` iteration |
+| `max_consecutive_missed_frames` | 3 | `loop()` iterations without a frame before the board halts and the watchdog resets it |
 | `battery_refresh_ms` | 60 000 | How often the LiPo is sampled |
 | `boot_delay_ms` | 5 000 | Grace period to attach a monitor before the radio starts |
-| `watchdog_timeout_s` | 8 | Must exceed the boot delay and one frame-read timeout |
+| `watchdog_timeout_s` | 8 | Backstop for a hung firmware; `static_assert`ed to exceed the boot delay and one frame-read timeout |
 | `ble_advertising` | +4 dBm, 100 ms | TX power, advertising intervals and timeouts |
 | `ble_peripheral` | interval 0/0 | Connection-level radio settings. `notify_burst` is overlaid from the active protocol; connection interval in 1.25 ms units, 0 = stack default, `6`/`12` (7.5–15 ms) for full-throttle tests |
 | `ActiveBleProtocol` | `RejsaBleProtocol<BluefruitBlePeripheral>` | The wire protocol this build speaks |
@@ -64,7 +67,7 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 
 **Boot.** `setup()` arms the hardware watchdog, initialises the MLX90641 (EEPROM dump, Hamming check, calibration extraction, resolution and refresh rate), samples the battery, waits `boot_delay_ms`, starts the radio, and registers the BLE protocol. A part that ships with the one dead pixel the datasheet allows is accepted: init logs a warning naming the pixel, and every frame interpolates it from its row neighbours. Any fatal error is logged and the board deliberately lets the watchdog reset it.
 
-**Loop.** Each iteration reads one frame (retrying on transient failures), computes per-pixel temperatures, averages the 16 columns, refreshes the battery reading when due, and publishes the sample. Both MLX90641 sub-pages are accepted, so the BLE update rate equals the sensor's refresh rate.
+**Loop.** Each iteration reads one frame (retrying on transient failures), computes per-pixel temperatures, averages the 16 columns, refreshes the battery reading when due, and publishes the sample. Both MLX90641 sub-pages are accepted, so the BLE update rate equals the sensor's refresh rate. An iteration whose retries all fail skips the publish; `max_consecutive_missed_frames` such iterations in a row halt the board.
 
 **BLE protocol (RejsaRubberTrac).** Service `0x1ff7` with three 20-byte NOTIFY characteristics, all temperatures in tenths of a degree, little-endian:
 
@@ -78,7 +81,7 @@ The device name is `RejsaRubber` + corner + the last three MAC bytes in hex, e.g
 
 **Serial frame stream.** When enabled, every frame is also written to the USB serial port as the 4-byte magic `AA 55 54 54` followed by 192 little-endian `float32` values in row-major order. Text logs share the port; the magic is how `scripts/visualization/serial_viz.py` finds frame boundaries.
 
-**Supervision.** The nRF52 watchdog is fed once per `loop()` and once per frame-read attempt. A wedged sensor, a stuck bus or a fatal init error all end in a reset rather than a hung board; the `Firmware build` log line tells you which revision came back up. Before the bus starts, `ArduinoWire::begin()` checks for a slave holding SDA low (left over from a reset mid-transfer) and frees it by clocking SCL; the outcome is logged at boot.
+**Supervision.** Every fault the firmware can observe ends in `halt()`, which logs the reason and stops feeding the nRF52 watchdog: a fatal init error, and at run time `max_consecutive_missed_frames` iterations without a frame (a wedged sensor or a stuck bus fails each frame read within the driver's data-ready timeout, so the halt comes ~6 s in at `Hz8`). The watchdog itself, fed once per `loop()` and once per frame-read attempt, is only the backstop for the firmware hanging outright; `config.hh` asserts that one frame-read timeout and the boot delay each fit inside its window. Either way the board resets rather than hangs, and the `Firmware build` log line tells you which revision came back up. Before the bus starts, `ArduinoWire::begin()` checks for a slave holding SDA low (left over from a reset mid-transfer) and frees it by clocking SCL; the outcome is logged at boot.
 
 ## Project layout
 

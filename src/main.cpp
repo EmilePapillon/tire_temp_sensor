@@ -43,6 +43,7 @@ BluefruitBlePeripheral peripheral{peripheral_config()};  ///< The BLE radio.
 config::ActiveBleProtocol ble_protocol(peripheral, config::ble_advertising);
 ArduinoLogger logger;                               ///< Logger for main.cpp's own messages.
 TireTelemetry telemetry{};                          ///< The sample being assembled for publish().
+uint8_t consecutive_missed_frames = 0;              ///< loop() iterations in a row that produced no frame.
 
 /// @brief Refresh the battery fields of `telemetry` from the ADC.
 ///
@@ -65,7 +66,7 @@ void refresh_battery() {
 /// @return True if a frame was acquired.
 bool read_frame_with_retries() {
     for (uint8_t attempt = 1; attempt <= config::frame_read_max_retries; attempt++) {
-        watchdog_feed();  // a frame read may legitimately take several seconds to time out
+        watchdog_feed();  // a frame read may legitimately take config::mlx90641_data_ready_timeout_us to give up
         const mlx90641::Status status = mlx_sensor.read_frame();
         if (status == mlx90641::Status::Success) {
             return true;
@@ -151,9 +152,19 @@ void loop() {
 
     logger.log(LogLevel::DEBUG, "Attempting to read frame...");
     if (!read_frame_with_retries()) {
+        // A sensor that stays silent is a fault the firmware can see, so the firmware decides
+        // to reset rather than leaving it to the watchdog: halt() stops feeding it.
+        consecutive_missed_frames++;
+        if (consecutive_missed_frames >= config::max_consecutive_missed_frames) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "No frame in %u consecutive loop iterations; sensor unresponsive",
+                     consecutive_missed_frames);
+            halt(msg);
+        }
         logger.log(LogLevel::ERROR, "Missed frame, all retries failed. Skipping notification.");
         return;
     }
+    consecutive_missed_frames = 0;
 
     if (config::mlx90641_use_eeprom_emissivity) {
         mlx_sensor.calculate_temps();
