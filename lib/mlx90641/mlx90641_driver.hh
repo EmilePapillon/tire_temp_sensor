@@ -42,7 +42,7 @@ Status from_i2c(I2cStatus status);
 constexpr std::size_t sensor_columns = 16;                            ///< Pixels across the tread.
 constexpr std::size_t sensor_rows = 12;                               ///< Pixels along the tread.
 constexpr std::size_t num_pixels = sensor_columns * sensor_rows;      ///< Pixels per frame.
-constexpr std::size_t frame_data_size = 834;                          ///< Words in a raw RAM frame + 2 status words.
+constexpr std::size_t frame_data_size = 242;                          ///< 192 pixel/aux words + [240] control reg 1 + [241] sub-page.
 
 /// @brief Average each of the 16 columns over the 12 rows of a row-major frame.
 /// @param temps Per-pixel temperatures, row-major, index = row * 16 + column.

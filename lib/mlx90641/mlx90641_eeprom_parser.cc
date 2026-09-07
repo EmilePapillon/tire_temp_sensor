@@ -1,5 +1,4 @@
 #include "mlx90641_eeprom_parser.hh"
-#include <stdexcept>
 #include <algorithm>
 
 namespace mlx90641 {
@@ -25,7 +24,6 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     params.kv = get_kv();
     params.cpAlpha = get_cp_alpha();
     params.cpOffset = get_cp_offset();
-    params.ct = get_ct();
     params.cpKv = get_cp_kv();
     params.cpKta = get_cp_kta();
     params.brokenPixels = get_broken_pixels();
@@ -391,16 +389,9 @@ std::array<std::uint16_t, 2> MLX90641EEpromParser::get_broken_pixels() const
 uint32_t MLX90641EEpromParser::extract_raw_field(const std::array<uint16_t, eeprom_size>& eeprom_data,
                                           const EepromWord& w)
 {
-    if (w.address < eeprom_start_address)
-    {
-        // throw std::out_of_range("EEPROM address below start address");
-    }
+    // Every address comes from the fixed EepromAddr table (plus a bounded pixel
+    // offset), so it always lands inside [eeprom_start_address, +eeprom_size).
     const uint16_t index = w.address - eeprom_start_address;
-    if (index >= eeprom_size)
-    {
-        // throw std::out_of_range("EEPROM index out of range");
-    }
-    // check for bit_width of 32 to avoid undefined behavior
     const uint32_t mask = w.bit_width >= 32 ? 0xFFFFFFFFu : ((1ul << w.bit_width) - 1ul);
     return (eeprom_data[index] >> w.start_bit) & mask;
 }
@@ -426,10 +417,6 @@ int32_t MLX90641EEpromParser::extract_param_array(const DualEepromWord& words) c
     const auto& upper = words.words[0];
     const auto& lower = words.words[1];
     const uint8_t total_bit_width = upper.bit_width + lower.bit_width;
-
-    if (total_bit_width > 32) {
-        // throw std::runtime_error("Combined bit width exceeds 32 bits");
-    }
 
     const uint32_t upper_val = extract_raw_field(eeprom_data_, upper);
     const uint32_t lower_val = extract_raw_field(eeprom_data_, lower);
