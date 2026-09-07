@@ -29,8 +29,9 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     params.cpKv = get_cp_kv();
     params.cpKta = get_cp_kta();
     params.brokenPixels = get_broken_pixels();
-    if (params.brokenPixels[0] != 0xFFFF  || params.brokenPixels[1] != 0xFFFF) {
-        return false; // too many broken pixels
+    // A filled overflow slot means more than max_broken_pixels.
+    if (params.brokenPixels[max_broken_pixels] != no_broken_pixel) {
+        return false;  // too many broken pixels
     }
     return true;
 }
@@ -356,14 +357,15 @@ std::array<std::array<std::int16_t, 192>, 2> MLX90641EEpromParser::get_offset() 
     return offset;
 }
 
-std::array<std::uint16_t, 2> MLX90641EEpromParser::get_broken_pixels() const
+std::array<std::uint16_t, broken_pixel_slots> MLX90641EEpromParser::get_broken_pixels() const
 {
     constexpr std::size_t pixel_count = 192u; // total number of pixels
-    std::array<std::uint16_t, 2> broken_pixels;
-    std::fill(broken_pixels.begin(), broken_pixels.end(), 0xFFFF);
+    std::array<std::uint16_t, broken_pixel_slots> broken_pixels;
+    std::fill(broken_pixels.begin(), broken_pixels.end(), no_broken_pixel);
 
+    // Stop once every slot is filled; the overflow slot only has to show there are more.
     std::size_t num_broken_pixels = 0u;
-    for (std::size_t i = 0u; i < pixel_count && num_broken_pixels < 3; ++i) 
+    for (std::size_t i = 0u; i < pixel_count && num_broken_pixels < broken_pixels.size(); ++i)
     {
         const uint16_t address1 = EepromAddr::offset_even + i;
         const SingleEepromWord word1 = {address1, 0, 11, 0, false};
@@ -376,8 +378,8 @@ std::array<std::uint16_t, 2> MLX90641EEpromParser::get_broken_pixels() const
         if (extract_param(word1) == 0 && extract_param(word2) == 0 &&
             extract_param(word3) == 0 && extract_param(word4) == 0) 
         {
-        broken_pixels[num_broken_pixels] = i;
-        num_broken_pixels++; 
+            broken_pixels[num_broken_pixels] = static_cast<std::uint16_t>(i);
+            num_broken_pixels++;
         }
     }
     

@@ -33,16 +33,22 @@ struct DualEepromWord {
     bool is_signed;                   ///< Whether the combined value is two's complement.
 };
 
+/// @brief Width of the widest type the scale helpers shift, in bits.
+///
+/// A corrupt EEPROM can decode an exponent far past this, which is UB to shift by.
+constexpr uint8_t max_shift_exp = 64;
+
 /// @brief Scale a raw fixed-point field to a real value by dividing by 2^scale_exp.
 /// @param raw_value Sign-extended raw field.
 /// @param scale_exp Exponent of the divisor.
-/// @return raw_value / 2^scale_exp.
+/// @return raw_value / 2^scale_exp, or 0 for an exponent of max_shift_exp or more.
 float scale_by_division(int32_t raw_value, uint8_t scale_exp);
 
 /// @brief Scale a raw integral field by multiplying by 2^scale_exp (unsigned fields are used raw).
 /// @param raw_value Sign-extended raw field.
 /// @param scale_exp Exponent of the multiplier.
-/// @return raw_value * 2^scale_exp, computed in 32 bits and truncated to 16.
+/// @return raw_value * 2^scale_exp, computed in 64 bits and truncated to 16; 0
+///         from an exponent of 16 up, where the truncation leaves nothing behind.
 std::int16_t scale_by_multiplication(int16_t raw_value, uint8_t scale_exp);
 
 /// @brief Extracts calibration parameters from a Hamming-decoded EEPROM image.
@@ -54,7 +60,8 @@ public:
 
     /// @brief Extract every parameter into @p params.
     /// @param params Receives all calibration values.
-    /// @return True on success; false if a field is out of the range the datasheet allows.
+    /// @return True on success; false if a field is out of the range the datasheet
+    ///         allows, or the image reports more than max_broken_pixels broken pixels.
     bool extract_all(ParamsMLX90641& params) const;
 
     /// @brief Returns the KVdd calibration coefficient (units: LSB/V).
@@ -194,11 +201,12 @@ public:
     /// @return [sub-page][pixel] offsets in LSB.
     std::array<std::array<std::int16_t, 192>, 2> get_offset() const;
 
-    /// @brief Returns indices of broken pixels (max 2) that should be masked/ignored.
+    /// @brief Returns the indices of the broken pixels the EEPROM reports.
     ///
     /// Pixels are considered “broken” if all EEPROM offset values at their positions (across subpages) are zero.
-    /// @return Pixel indices; 65535 marks an unused slot.
-    std::array<std::uint16_t, 2> get_broken_pixels() const;
+    /// The scan stops once every slot is filled; the last slot only has to show there are more.
+    /// @return Pixel indices, lowest first; no_broken_pixel marks an unused slot.
+    std::array<std::uint16_t, broken_pixel_slots> get_broken_pixels() const;
 
 
 private:

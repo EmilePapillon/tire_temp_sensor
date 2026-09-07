@@ -24,4 +24,15 @@ inline uint16_t hamming_encode(uint16_t data11) {
     return word;
 }
 
+inline std::array<uint16_t, eeprom_size> eeprom_with_broken_pixels(std::initializer_list<std::size_t> pixels) {
+    std::array<uint16_t, eeprom_size> data = test_eeprom_data;
+    for (const std::size_t pixel : pixels) {
+        for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel, EepromAddr::kta_pixel,
+                                    EepromAddr::offset_odd}) {
+            data[base - eeprom_start_address + pixel] = 0;
+        }
+    }
+    return data;
+}
+
 }  // namespace mlx90641

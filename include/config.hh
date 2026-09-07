@@ -35,7 +35,7 @@ constexpr WheelCorner wheel_corner = WheelCorner::FL;
 constexpr LogLevel log_level = LogLevel::INFO;
 /// Serial port baud rate.
 constexpr uint32_t serial_baud = 115200;
-/// Stream every raw 12x16 float frame over Serial for scripts/vizualisation/serial_viz.py.
+/// Stream every raw 12x16 float frame over Serial for scripts/visualization/serial_viz.py.
 /// A bench aid for calibration and physical positioning that bypasses BLE. The car build
 /// only uses BLE, and the 772-byte blocking UART write would pace loop() at ~11 Hz, so off.
 constexpr bool stream_frames_over_serial = false;

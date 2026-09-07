@@ -43,7 +43,7 @@ Status from_i2c(I2cStatus status);
 constexpr std::size_t sensor_columns = 16;                            ///< Pixels across the tread.
 constexpr std::size_t sensor_rows = 12;                               ///< Pixels along the tread.
 constexpr std::size_t num_pixels = sensor_columns * sensor_rows;      ///< Pixels per frame.
-constexpr std::size_t frame_data_size = 834;                          ///< Words in a raw RAM frame + 2 status words.
+constexpr std::size_t frame_data_size = 242;                          ///< Words the driver keeps: 240 RAM words + control register 1 + sub-page.
 
 /// @brief Average each of the 16 columns over the 12 rows of a row-major frame.
 /// @param temps Per-pixel temperatures, row-major, index = row * 16 + column.
@@ -78,6 +78,8 @@ public:
     ///
     /// Failing to program the resolution or refresh rate is logged as a warning
     /// but does not fail init: the sensor still produces frames at its defaults.
+    /// So is a part with up to max_broken_pixels broken pixels: init warns, naming
+    /// each, and calculate_temps() interpolates them away.
     /// @param config Bus speed, resolution, refresh rate and polling limit.
     /// @return Success, or the first fatal failure.
     Status init(const Mlx90641Config& config);
@@ -166,7 +168,7 @@ private:
     /// @return Degrees Celsius.
     float get_ta() const;
 
-    /// @brief Replace the (at most two) EEPROM-flagged broken pixels by interpolating their neighbours.
+    /// @brief Replace the EEPROM-flagged broken pixels by interpolating their row neighbours.
     void bad_pixels_correction();
 
     /// @brief Emissivity stored in the EEPROM.

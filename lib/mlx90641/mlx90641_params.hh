@@ -1,11 +1,24 @@
 #pragma once
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 /// @file mlx90641_params.hh
 /// @brief Calibration parameter set decoded from the MLX90641 EEPROM.
 
 namespace mlx90641 {
+
+/// @brief Broken pixels the driver tolerates.
+///
+/// The datasheet allows a part to ship with one dead pixel;
+/// MLX90641Sensor::bad_pixels_correction() interpolates it from its neighbours.
+constexpr std::size_t max_broken_pixels = 1;
+
+/// @brief Slots in the broken-pixel list: one per tolerated pixel, plus an overflow slot.
+constexpr std::size_t broken_pixel_slots = max_broken_pixels + 1;
+
+/// @brief Value marking an unused broken-pixel slot. No pixel index can reach it.
+constexpr std::uint16_t no_broken_pixel = 0xFFFFu;
 
 /// @brief All calibration parameters the temperature math needs, in the Melexis reference naming.
 struct ParamsMLX90641 {
@@ -31,7 +44,7 @@ struct ParamsMLX90641 {
     float cpAlpha;                                         ///< Compensation-pixel sensitivity.
     std::int16_t cpOffset;                                 ///< Compensation-pixel offset, LSB.
     float emissivityEE;                                    ///< Default emissivity, 0..1.
-    std::array<std::uint16_t, 2> brokenPixels;             ///< Indices of broken pixels; 65535 = none.
+    std::array<std::uint16_t, broken_pixel_slots> brokenPixels;  ///< Indices of broken pixels; no_broken_pixel = empty slot.
 };
 
 }  // namespace mlx90641
