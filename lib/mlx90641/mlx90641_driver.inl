@@ -115,7 +115,6 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::read_frame() {
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps() {
     calculate_to(get_emissivity(), ambient_);
-    bad_pixels_correction();
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -126,7 +125,6 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity) {
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity, float reflected_temperature_c) {
     calculate_to(emissivity, reflected_temperature_c);
-    bad_pixels_correction();
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -467,37 +465,6 @@ float MLX90641Sensor<I2CAdapterT, LoggerT>::get_ta() const {
     float ta = (ptat_art / (1.0f + p.KvPTAT * (vdd - 3.3f)) - p.vPTAT25);
     ta = ta / p.KtPTAT + 25.0f;
     return ta;
-}
-
-template <typename I2CAdapterT, typename LoggerT>
-void MLX90641Sensor<I2CAdapterT, LoggerT>::bad_pixels_correction() {
-    const auto& broken = calibration_parameters_.brokenPixels;
-    float ap[2];
-    uint8_t pix = 0;
-
-    while (pix < broken.size() && broken[pix] < 65535) {
-        const uint16_t index = broken[pix];
-        const uint8_t line = index >> 5;
-        const uint8_t column = index - (line << 5);
-
-        if (column == 0) {
-            temps_[index] = temps_[index + 1];
-        } else if (column == 1 || column == 14) {
-            temps_[index] = (temps_[index - 1] + temps_[index + 1]) / 2.0f;
-        } else if (column == 15) {
-            temps_[index] = temps_[index - 1];
-        } else {
-            ap[0] = temps_[index + 1] - temps_[index + 2];
-            ap[1] = temps_[index - 1] - temps_[index - 2];
-            if (fabsf(ap[0]) > fabsf(ap[1])) {
-                temps_[index] = temps_[index - 1] + ap[1];
-            } else {
-                temps_[index] = temps_[index + 1] + ap[0];
-            }
-        }
-
-        pix = pix + 1;
-    }
 }
 
 template <typename I2CAdapterT, typename LoggerT>

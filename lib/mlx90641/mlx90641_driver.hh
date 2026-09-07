@@ -168,9 +168,6 @@ private:
     /// @return Degrees Celsius.
     float get_ta() const;
 
-    /// @brief Replace the (at most two) EEPROM-flagged broken pixels by interpolating their neighbours.
-    void bad_pixels_correction();
-
     /// @brief Emissivity stored in the EEPROM.
     /// @return Emissivity, 0..1.
     float get_emissivity() const;

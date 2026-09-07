@@ -29,8 +29,10 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     params.cpKv = get_cp_kv();
     params.cpKta = get_cp_kta();
     params.brokenPixels = get_broken_pixels();
-    if (params.brokenPixels[0] != 0xFFFF  || params.brokenPixels[1] != 0xFFFF) {
-        return false; // too many broken pixels
+    // Zero tolerance: any deviating pixel fails calibration extraction, so the
+    // driver never has to correct one at runtime.
+    if (params.brokenPixels[0] != 0xFFFF || params.brokenPixels[1] != 0xFFFF) {
+        return false;
     }
     return true;
 }
