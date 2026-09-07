@@ -377,7 +377,7 @@ std::uint16_t MLX90641EEpromParser::find_deviating_pixel() const
             return pixel;
         }
     }
-    return 0xFFFFu;
+    return 0xFFFFu;  // sentinel: no deviating pixel found
 }
 
 uint32_t MLX90641EEpromParser::extract_raw_field(const std::array<uint16_t, eeprom_size>& eeprom_data,
