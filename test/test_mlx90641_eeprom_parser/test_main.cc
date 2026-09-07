@@ -154,21 +154,44 @@ void test_offset() {
     }
 }
 
-void test_find_deviating_pixel_returns_none_for_the_reference_sensor() {
-    TEST_ASSERT_EQUAL_UINT16(0xFFFF, eeprom->find_deviating_pixel());
-}
-
-void test_find_deviating_pixel_flags_an_all_zero_pixel() {
-    // Zero every per-pixel calibration word for pixel 7: the EEPROM's way of
-    // flagging a dead pixel. It must be reported and must fail extract_all().
-    auto data = test_eeprom_data;
+// Zero every per-pixel calibration word for `pixel` -- the EEPROM's way of
+// flagging a deviating pixel.
+static void flag_deviating_pixel(std::array<uint16_t, eeprom_size>& data, uint16_t pixel) {
     for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel,
                                 EepromAddr::kta_pixel, EepromAddr::offset_odd}) {
-        data[base - eeprom_start_address + 7] = 0;
+        data[base - eeprom_start_address + pixel] = 0;
     }
+}
+
+void test_count_deviating_pixels_none_for_the_reference_sensor() {
+    std::uint16_t first = 0;
+    TEST_ASSERT_EQUAL_UINT8(0, eeprom->count_deviating_pixels(first));
+    TEST_ASSERT_EQUAL_UINT16(0xFFFF, first);
+}
+
+void test_count_deviating_pixels_accepts_one() {
+    auto data = test_eeprom_data;
+    flag_deviating_pixel(data, 7);
 
     MLX90641EEpromParser parser(data);
-    TEST_ASSERT_EQUAL_UINT16(7, parser.find_deviating_pixel());
+    std::uint16_t first = 0;
+    TEST_ASSERT_EQUAL_UINT8(1, parser.count_deviating_pixels(first));
+    TEST_ASSERT_EQUAL_UINT16(7, first);
+
+    ParamsMLX90641 params;
+    TEST_ASSERT_TRUE(parser.extract_all(params));  // one deviating pixel is allowed
+    TEST_ASSERT_EQUAL_UINT16(7, params.deviatingPixel);
+}
+
+void test_count_deviating_pixels_rejects_two() {
+    auto data = test_eeprom_data;
+    flag_deviating_pixel(data, 7);
+    flag_deviating_pixel(data, 40);
+
+    MLX90641EEpromParser parser(data);
+    std::uint16_t first = 0;
+    TEST_ASSERT_EQUAL_UINT8(2, parser.count_deviating_pixels(first));
+    TEST_ASSERT_EQUAL_UINT16(7, first);  // still the first one
 
     ParamsMLX90641 params;
     TEST_ASSERT_FALSE(parser.extract_all(params));
@@ -209,8 +232,9 @@ int main(int argc, char **argv) {
     RUN_TEST(test_resolution_ee);
     RUN_TEST(test_ct);
     RUN_TEST(test_offset);
-    RUN_TEST(test_find_deviating_pixel_returns_none_for_the_reference_sensor);
-    RUN_TEST(test_find_deviating_pixel_flags_an_all_zero_pixel);
+    RUN_TEST(test_count_deviating_pixels_none_for_the_reference_sensor);
+    RUN_TEST(test_count_deviating_pixels_accepts_one);
+    RUN_TEST(test_count_deviating_pixels_rejects_two);
     RUN_TEST(test_scale_helpers_reject_oversized_exponents);
     return UNITY_END();
 }

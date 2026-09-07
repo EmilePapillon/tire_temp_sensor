@@ -194,14 +194,15 @@ public:
     /// @return [sub-page][pixel] offsets in LSB.
     std::array<std::array<std::int16_t, 192>, 2> get_offset() const;
 
-    /// @brief Index of the first pixel the EEPROM flags as deviating.
+    /// @brief Count the pixels the EEPROM flags as deviating (saturating at 2).
     ///
     /// A pixel is flagged when all of its per-pixel calibration words (offset
-    /// sub-page 0/1, alpha, kta) are zero. Any such pixel fails extract_all();
-    /// the firmware does not correct deviating pixels, so the first one is all
-    /// the caller needs.
-    /// @return Row-major pixel index 0..191, or 0xFFFF if there is none.
-    std::uint16_t find_deviating_pixel() const;
+    /// sub-page 0/1, alpha, kta) are zero. The datasheet allows at most one, so
+    /// the scan stops once a second is seen.
+    /// @param first_index Receives the first deviating pixel's row-major index
+    ///        (0..191), or 0xFFFF if there is none.
+    /// @return 0, 1, or 2 (2 meaning "two or more").
+    std::uint8_t count_deviating_pixels(std::uint16_t& first_index) const;
 
 
 private:

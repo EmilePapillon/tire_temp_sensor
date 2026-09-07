@@ -57,10 +57,11 @@ Runs in order, stopping at the first fatal failure:
    - any multi-bit error → `EepromCorrupt` (fatal).
 3. **Identify + parse** (`extract_parameters` → `MLX90641EEpromParser`):
    - device-select bit (`ee_data_[10] & 0x0040`) clear → `NotAnMlx90641` (fatal);
-   - any pixel with all four per-pixel calibration words zero is a factory-flagged
-     deviating pixel → `CalibrationExtractionFailed` (fatal). The driver does
-     **not** interpolate deviating pixels; it logs the offending index at
-     `ERROR` and refuses to run. A healthy part has none.
+   - a pixel with all four per-pixel calibration words zero is a factory-flagged
+     deviating pixel. The datasheet (§9) permits **one**: it is logged at `WARN`
+     with its index and interpolated on every frame (see below). **Two or more**
+     means the part is out of spec → `CalibrationExtractionFailed` (fatal),
+     logged at `ERROR`.
 4. `set_resolution` / `set_refresh_rate` — a bus failure here is logged at
    `WARN` only; the sensor keeps its power-on defaults and `init` still succeeds.
 
@@ -103,12 +104,19 @@ Three overloads, all writing `temps_` (read back with `get_temps()`):
 The math is the Melexis `CalculateTo` reference in single precision (the
 Cortex-M4F has no double FPU).
 
-**Bad-value handling.** A corrupt frame or calibration can make an individual
-pixel come out non-finite (e.g. a zero gain word) or wildly out of range. Such a
-pixel is **not** written — `temps_` keeps that pixel's previous value — so one
-glitch cannot poison `column_averages()` or the publish. The accepted range is
-the sensor's −40…300 °C spec limit. Before the first successful frame the held
-value is 0.
+**Transient bad values.** A corrupt frame can make an individual pixel come out
+non-finite (e.g. a zero gain word) or wildly out of range. Such a pixel is
+**not** written — `temps_` keeps that pixel's previous value — so one glitch
+cannot poison `column_averages()` or the publish. The accepted range is the
+sensor's −40…300 °C spec limit. Before the first successful frame the held value
+is 0.
+
+**Deviating pixel.** The one pixel the EEPROM flags as deviating (if any) has no
+calibration of its own, so the hold-last-value guard above would leave it stuck
+near 0 forever. Instead, after `calculate_to()` each frame,
+`correct_deviating_pixel()` overwrites it with a horizontal interpolation of its
+row neighbours — the Melexis `MLX90641_BadPixelsCorrection` logic (16-wide
+stride). No-op when there is no deviating pixel.
 
 ## Recovery contract
 

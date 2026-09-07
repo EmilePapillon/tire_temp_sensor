@@ -171,6 +171,13 @@ private:
     /// @param tr Reflected temperature in degrees Celsius.
     void calculate_to(float emissivity, float tr);
 
+    /// @brief Overwrite the one EEPROM-flagged deviating pixel (if any) in temps_
+    ///        with a horizontal interpolation of its row neighbours.
+    ///
+    /// Runs after calculate_to() on every frame. No-op when there is no deviating
+    /// pixel (calibration_parameters_.deviatingPixel == 0xFFFF).
+    void correct_deviating_pixel();
+
     /// @brief Supply voltage derived from the frame's VDD pixel and the current resolution.
     /// @return Volts.
     float get_vdd() const;

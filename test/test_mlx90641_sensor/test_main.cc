@@ -107,13 +107,24 @@ void test_init_rejects_uncorrectable_eeprom_corruption() {
     assert_status(Status::EepromCorrupt, sensor->init(test_config));
 }
 
-void test_init_rejects_a_sensor_with_a_deviating_pixel() {
-    // Zero every per-pixel calibration word for pixel 5: the EEPROM's way of
-    // flagging a dead pixel. extract_all() must fail closed rather than correct it.
+// Zero every per-pixel calibration word for `pixel` -- the EEPROM's way of
+// flagging a deviating pixel.
+void flag_deviating_pixel(uint16_t pixel) {
     for (const uint16_t base : {EepromAddr::offset_even, EepromAddr::alpha_pixel,
                                 EepromAddr::kta_pixel, EepromAddr::offset_odd}) {
-        bus->registers[base + 5] = 0;
+        bus->registers[base + pixel] = 0;
     }
+}
+
+void test_init_accepts_one_deviating_pixel() {
+    // The datasheet allows one; it is interpolated at runtime, not rejected.
+    flag_deviating_pixel(5);
+    assert_status(Status::Success, sensor->init(test_config));
+}
+
+void test_init_rejects_two_deviating_pixels() {
+    flag_deviating_pixel(5);
+    flag_deviating_pixel(60);
     assert_status(Status::CalibrationExtractionFailed, sensor->init(test_config));
 }
 
@@ -264,6 +275,24 @@ void test_calculate_temps_holds_last_value_on_a_corrupt_frame() {
     }
 }
 
+void test_calculate_temps_interpolates_a_deviating_pixel() {
+    constexpr std::size_t dead = 40;  // row 2, column 8 -- an interior column
+    flag_deviating_pixel(dead);
+    prime_frame(0);
+
+    assert_status(Status::Success, sensor->read_frame());
+    sensor->calculate_temps();
+    const auto temps = sensor->get_temps();
+
+    // The dead pixel gets a plausible value from its row neighbours, not the
+    // stuck-at-0 the hold-last-value guard would otherwise leave it at.
+    const float n_lo = std::fmin(temps[dead - 1], temps[dead + 1]);
+    const float n_hi = std::fmax(temps[dead - 1], temps[dead + 1]);
+    TEST_ASSERT_TRUE(std::isfinite(temps[dead]));
+    TEST_ASSERT_TRUE(temps[dead] > 1.0f);  // definitely not stuck at 0
+    TEST_ASSERT_FLOAT_WITHIN(5.0f, (n_lo + n_hi) * 0.5f, temps[dead]);
+}
+
 // ---------------------------------------------------------------- helpers
 
 void test_column_averages_average_each_column_over_all_rows() {
@@ -299,7 +328,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_reports_bus_error);
     RUN_TEST(test_init_rejects_a_device_that_is_not_an_mlx90641);
     RUN_TEST(test_init_rejects_uncorrectable_eeprom_corruption);
-    RUN_TEST(test_init_rejects_a_sensor_with_a_deviating_pixel);
+    RUN_TEST(test_init_accepts_one_deviating_pixel);
+    RUN_TEST(test_init_rejects_two_deviating_pixels);
     RUN_TEST(test_init_tolerates_a_correctable_eeprom_bit_flip);
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
@@ -311,6 +341,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_calculate_temps_on_sub_page_1_agrees_with_sub_page_0);
     RUN_TEST(test_calculate_temps_accepts_deployment_emissivity);
     RUN_TEST(test_calculate_temps_holds_last_value_on_a_corrupt_frame);
+    RUN_TEST(test_calculate_temps_interpolates_a_deviating_pixel);
     RUN_TEST(test_column_averages_average_each_column_over_all_rows);
     RUN_TEST(test_hamming_encode_round_trips_through_the_fixture);
     return UNITY_END();

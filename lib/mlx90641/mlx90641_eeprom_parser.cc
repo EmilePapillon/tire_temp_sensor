@@ -25,10 +25,9 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     params.cpOffset = get_cp_offset();
     params.cpKv = get_cp_kv();
     params.cpKta = get_cp_kta();
-    params.deviatingPixel = find_deviating_pixel();
-    // Zero tolerance: any deviating pixel fails calibration extraction, so the
-    // driver never has to correct one at runtime.
-    if (params.deviatingPixel != 0xFFFF) {
+    // The datasheet allows at most one deviating pixel; the caller interpolates
+    // that one at runtime. Two or more means the part is out of spec.
+    if (count_deviating_pixels(params.deviatingPixel) > 1) {
         return false;
     }
     return true;
@@ -355,12 +354,16 @@ std::array<std::array<std::int16_t, 192>, 2> MLX90641EEpromParser::get_offset() 
     return offset;
 }
 
-std::uint16_t MLX90641EEpromParser::find_deviating_pixel() const
+std::uint8_t MLX90641EEpromParser::count_deviating_pixels(std::uint16_t& first_index) const
 {
     constexpr uint16_t pixel_count = 192u;
     constexpr uint16_t bases[] = {EepromAddr::offset_even, EepromAddr::alpha_pixel,
                                   EepromAddr::kta_pixel, EepromAddr::offset_odd};
-    for (uint16_t pixel = 0u; pixel < pixel_count; ++pixel)
+    first_index = 0xFFFFu;  // sentinel: no deviating pixel
+    std::uint8_t count = 0u;
+    // Stop once two are known: that already exceeds the datasheet limit, and the
+    // caller only needs the first index to interpolate the single allowed one.
+    for (uint16_t pixel = 0u; pixel < pixel_count && count < 2u; ++pixel)
     {
         bool all_zero = true;
         for (const uint16_t base : bases)
@@ -374,10 +377,14 @@ std::uint16_t MLX90641EEpromParser::find_deviating_pixel() const
         }
         if (all_zero)
         {
-            return pixel;
+            if (count == 0u)
+            {
+                first_index = pixel;
+            }
+            ++count;
         }
     }
-    return 0xFFFFu;  // sentinel: no deviating pixel found
+    return count;
 }
 
 uint32_t MLX90641EEpromParser::extract_raw_field(const std::array<uint16_t, eeprom_size>& eeprom_data,

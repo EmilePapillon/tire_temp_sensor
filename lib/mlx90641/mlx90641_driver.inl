@@ -114,6 +114,7 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::read_frame() {
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps() {
     calculate_to(get_emissivity(), ambient_);
+    correct_deviating_pixel();
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -124,6 +125,7 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity) {
 template <typename I2CAdapterT, typename LoggerT>
 void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_temps(float emissivity, float reflected_temperature_c) {
     calculate_to(emissivity, reflected_temperature_c);
+    correct_deviating_pixel();
 }
 
 template <typename I2CAdapterT, typename LoggerT>
@@ -317,13 +319,15 @@ Status MLX90641Sensor<I2CAdapterT, LoggerT>::extract_parameters() {
     }
 
     if (!MLX90641EEpromParser(ee_data_).extract_all(calibration_parameters_)) {
-        if (calibration_parameters_.deviatingPixel != 0xFFFF) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "EEPROM flags a deviating pixel at index %u",
-                     calibration_parameters_.deviatingPixel);
-            log(LogLevel::ERROR, msg);
-        }
+        // extract_all() only rejects for more than one deviating pixel.
+        log(LogLevel::ERROR, "EEPROM flags more than one deviating pixel; calibration rejected");
         return Status::CalibrationExtractionFailed;
+    }
+    if (calibration_parameters_.deviatingPixel != 0xFFFF) {
+        char msg[80];
+        snprintf(msg, sizeof(msg), "EEPROM flags a deviating pixel at index %u; it is interpolated each frame",
+                 calibration_parameters_.deviatingPixel);
+        log(LogLevel::WARN, msg);
     }
 
     {
@@ -448,6 +452,32 @@ void MLX90641Sensor<I2CAdapterT, LoggerT>::calculate_to(float emissivity, float 
         if (std::isfinite(to) && to > pixel_temp_min_c && to < pixel_temp_max_c) {
             temps_[pixel_number] = to;
         }
+    }
+}
+
+template <typename I2CAdapterT, typename LoggerT>
+void MLX90641Sensor<I2CAdapterT, LoggerT>::correct_deviating_pixel() {
+    const uint16_t pixel = calibration_parameters_.deviatingPixel;
+    if (pixel >= num_pixels) {
+        return;  // 0xFFFF: no deviating pixel
+    }
+    // A deviating pixel has no calibration of its own, so calculate_to() produced
+    // garbage for it (held at its previous value by the guard above). Replace it
+    // with a horizontal interpolation of its row neighbours, per the Melexis
+    // reference MLX90641_BadPixelsCorrection and datasheet section 9. The
+    // datasheet permits only one such pixel, so its neighbours are always valid.
+    const uint16_t column = pixel % sensor_columns;
+    if (column == 0) {
+        temps_[pixel] = temps_[pixel + 1];
+    } else if (column == 1 || column == sensor_columns - 2) {
+        temps_[pixel] = (temps_[pixel - 1] + temps_[pixel + 1]) * 0.5f;
+    } else if (column == sensor_columns - 1) {
+        temps_[pixel] = temps_[pixel - 1];
+    } else {
+        const float slope_right = temps_[pixel + 1] - temps_[pixel + 2];
+        const float slope_left = temps_[pixel - 1] - temps_[pixel - 2];
+        temps_[pixel] = (fabsf(slope_right) > fabsf(slope_left)) ? temps_[pixel - 1] + slope_left
+                                                                : temps_[pixel + 1] + slope_right;
     }
 }
 
