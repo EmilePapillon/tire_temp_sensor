@@ -86,7 +86,7 @@ include/config.hh          every tunable, and the active BLE protocol alias
 lib/                       portable C++, built and tested on the host
   logger/                  LogLevel, the Logger shape, NullLogger
   i2c_adapter/             the Wire shape, I2CAdapter<WireT>, I2cStatus
-  mlx90641/                MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config, Status
+  mlx90641/                MLX90641Sensor<I2CAdapterT, LoggerT>, EEPROM parser, Mlx90641Config, Status; see its README
   ble_protocol/            the BlePeripheral shape, TireTelemetry, RejsaBleProtocol<PeripheralT>
   battery/                 LiPo voltage-to-percent curve
 include/ + src/            board glue: ArduinoWire, ArduinoLogger, BluefruitBlePeripheral,

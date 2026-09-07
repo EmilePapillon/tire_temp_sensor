@@ -31,7 +31,7 @@ enum class Status : uint8_t {
 
 /// @brief Human-readable name of a driver status, for log messages.
 /// @param status The status to name.
-/// @return A static lower-case string such as "data ready timeout"; never null.
+/// @return A static lower-case string such as "frame sync failed"; never null.
 const char* status_name(Status status);
 
 /// @brief Lift a bus status into the driver's status space.
@@ -77,7 +77,7 @@ public:
     ///
     /// Failing to program the resolution or refresh rate is logged as a warning
     /// but does not fail init: the sensor still produces frames at its defaults.
-    /// @param config Bus speed, resolution, refresh rate and polling limit.
+    /// @param config Bus speed, ADC resolution and refresh rate.
     /// @return Success, or the first fatal failure.
     Status init(const Mlx90641Config& config);
 
