@@ -50,7 +50,7 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 | `mlx90641_i2c_addr` | `0x33` | |
 | `mlx90641_refresh_rate` | `Hz8` | Sensor frame rate; `loop()` and the BLE publish rate follow it. `Hz32`/`Hz64` for full-throttle tests |
 | `mlx90641_config` | 400 kHz, 19-bit, `mlx90641_refresh_rate` | Bus speed, ADC resolution, frame rate |
-| `mlx90641_use_eeprom_emissivity` | `false` | Use the sensor-stored emissivity; set `false` to use the deployment-calibrated override |
+| `mlx90641_use_eeprom_emissivity` | `false` | `true` uses the sensor-stored emissivity; `false` uses the `mlx90641_emissivity` override below |
 | `mlx90641_emissivity` | `0.95` | Effective tire-surface emissivity when the EEPROM value is overridden; calibrate this for the tire/finish |
 | `battery_refresh_ms` | 60 000 | How often the LiPo is sampled |
 | `boot_delay_ms` | 5 000 | Grace period to attach a monitor before the radio starts |
@@ -75,7 +75,7 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 
 The device name is `RejsaRubber` + corner + the last three MAC bytes in hex, e.g. `RejsaRubberFLABCDEF`. Full details in [`lib/ble_protocol/rejsa_ble_protocol.hh`](lib/ble_protocol/rejsa_ble_protocol.hh).
 
-**Serial frame stream.** When enabled, every frame is also written to the USB serial port as the 4-byte magic `AA 55 54 54` followed by 192 little-endian `float32` values in row-major order. Text logs share the port; the magic is how `scripts/vizualisation/serial_viz.py` finds frame boundaries.
+**Serial frame stream.** When enabled, every frame is also written to the USB serial port as the 4-byte magic `AA 55 54 54` followed by 192 little-endian `float32` values in row-major order. Text logs share the port; the magic is how `scripts/visualization/serial_viz.py` finds frame boundaries.
 
 **Supervision.** The nRF52 watchdog is fed only after a frame has been read and published. A wedged sensor, a stuck bus or a fatal init error all end in a reset rather than a hung board; the `Firmware build` log line tells you which revision came back up. Before the bus starts, `ArduinoWire::begin()` checks for a slave holding SDA low (left over from a reset mid-transfer) and frees it by clocking SCL; the outcome is logged at boot.
 
@@ -93,7 +93,7 @@ include/ + src/            board glue: ArduinoWire, ArduinoLogger, BluefruitBleP
                            battery ADC, watchdog, serial frame stream, and main.cpp
 test/                      host unit tests, see test/README.md
 scripts/build_info.py      git revision stamp; standalone CLI, hooked into PlatformIO
-scripts/vizualisation/     live dashboards over serial and BLE, see its README
+scripts/visualization/     live dashboards over serial and BLE, see its README
 docs/Doxyfile              API documentation build and coverage check
 ```
 
@@ -114,7 +114,7 @@ docs/Doxyfile              API documentation build and coverage check
 ```sh
 pio test -e native                                                    # C++ unit tests on the host
 python -m unittest discover -s scripts -p "test_*.py"                 # build stamp script
-python -m unittest discover -s scripts/vizualisation -p "test_*.py"   # visualization tooling
+python -m unittest discover -s scripts/visualization -p "test_*.py"   # visualization tooling
 doxygen docs/Doxyfile                                                 # API docs -> docs/api/html; fails on any undocumented item
 ```
 
@@ -124,7 +124,7 @@ The API reference is published to GitHub Pages from `main` by `.github/workflows
 
 ## Visualization tooling
 
-`scripts/vizualisation/` (see its own README) contains `serial_viz.py` (full 12x16 heatmap from the serial frame stream) and `ble.py` (what a RaceChrono-style consumer sees, auto-detecting the protocol from the advertisement). The BLE decoders mirror the firmware's protocol split and have their own unit tests.
+`scripts/visualization/` (see its own README) contains `serial_viz.py` (full 12x16 heatmap from the serial frame stream) and `ble.py` (what a RaceChrono-style consumer sees, auto-detecting the protocol from the advertisement). The BLE decoders mirror the firmware's protocol split and have their own unit tests.
 
 ## Contributing
 

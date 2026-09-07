@@ -5,7 +5,7 @@
 
 /// @file serial_frame_stream.hh
 /// @brief Raw thermal frame stream over the USB serial port, consumed by
-/// scripts/vizualisation/serial_viz.py.
+/// scripts/visualization/serial_viz.py.
 ///
 /// Text logs share the same port, so every frame is prefixed with a 4-byte
 /// magic the reader synchronises on. The two leading bytes are outside the
