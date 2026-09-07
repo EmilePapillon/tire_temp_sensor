@@ -31,6 +31,10 @@ uint16_t hamming_encode(uint16_t data11);
 /// @return The image with those pixels zeroed; every other word is untouched.
 std::array<uint16_t, eeprom_size> eeprom_with_broken_pixels(std::initializer_list<std::size_t> pixels);
 
+/// @brief Copy of the fixture image with alpha_scale0's upper field saturated, as a corrupt image can read.
+/// @return The image whose first alpha row decodes to a shift of 83.
+std::array<uint16_t, eeprom_size> eeprom_with_oversized_alpha_scale();
+
 #include "fixtures/mlx90641_eeprom_fixture.inc"
 
 }  // namespace mlx90641

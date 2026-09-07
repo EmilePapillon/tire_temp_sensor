@@ -131,6 +131,15 @@ void test_init_rejects_more_broken_pixels_than_can_be_corrected() {
     assert_status(Status::CalibrationExtractionFailed, sensor->init(test_config));
 }
 
+void test_init_rejects_an_out_of_range_alpha_scale() {
+    // Left to run, this part publishes NaN while read_frame() reports Success.
+    bus->load_eeprom(eeprom_with_oversized_alpha_scale());
+    LoggingSensor logging_sensor(*bus, sensor_addr);
+
+    assert_status(Status::CalibrationExtractionFailed, logging_sensor.init(test_config));
+    TEST_ASSERT_TRUE(MockLogger::logged(LogLevel::ERROR, "EEPROM is out of range"));
+}
+
 // ---------------------------------------------------------------- read_frame()
 
 void test_read_frame_follows_the_status_register_handshake() {
@@ -318,6 +327,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_init_tolerates_a_correctable_eeprom_bit_flip);
     RUN_TEST(test_init_tolerates_a_broken_pixel_and_names_it);
     RUN_TEST(test_init_rejects_more_broken_pixels_than_can_be_corrected);
+    RUN_TEST(test_init_rejects_an_out_of_range_alpha_scale);
     RUN_TEST(test_read_frame_follows_the_status_register_handshake);
     RUN_TEST(test_read_frame_accepts_sub_page_1);
     RUN_TEST(test_read_frame_tolerates_status_register_readback_mismatch);

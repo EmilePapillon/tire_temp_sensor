@@ -38,6 +38,9 @@ struct DualEepromWord {
 /// A corrupt EEPROM can decode an exponent far past this, which is UB to shift by.
 constexpr uint8_t max_shift_exp = 64;
 
+/// @brief Number of alpha-scale rows the EEPROM carries (32 pixels each).
+constexpr std::size_t alpha_scale_rows = 6;
+
 /// @brief Scale a raw fixed-point field to a real value by dividing by 2^scale_exp.
 /// @param raw_value Sign-extended raw field.
 /// @param scale_exp Exponent of the divisor.
@@ -59,10 +62,16 @@ public:
     explicit MLX90641EEpromParser(const std::array<uint16_t, eeprom_size>& eeprom_data);
 
     /// @brief Extract every parameter into @p params.
+    ///
+    /// Fails closed on an image the temperature math cannot use.
     /// @param params Receives all calibration values.
-    /// @return True on success; false if a field is out of the range the datasheet
-    ///         allows, or the image reports more than max_broken_pixels broken pixels.
+    /// @return True on success; false on an out-of-range alpha scale or more than
+    ///         max_broken_pixels broken pixels.
     bool extract_all(ParamsMLX90641& params) const;
+
+    /// @brief Returns the decoded per-row alpha scale exponents, bias included.
+    /// @return Scale exponents, one per alpha row.
+    std::array<std::uint8_t, alpha_scale_rows> get_alpha_scales() const;
 
     /// @brief Returns the KVdd calibration coefficient (units: LSB/V).
     ///

@@ -197,18 +197,30 @@ void test_scale_helpers_saturate_on_an_oversized_exponent() {
 }
 
 void test_oversized_alpha_scale_yields_finite_alphas() {
-    // The six-bit alpha-scale field is biased by 20, so its maximum decodes to a
-    // shift of 83 - past the 64 bits scale_by_division shifts.
-    auto data = test_eeprom_data;
-    constexpr std::size_t alpha_scale0_index = EepromAddr::alpha_scale0 - eeprom_start_address;
-    data[alpha_scale0_index] = static_cast<uint16_t>((data[alpha_scale0_index] & 0x001F) | (63U << 5));
-
-    MLX90641EEpromParser parser(data);
+    // The saturated scale decodes to 83, past the 64 bits scale_by_division shifts.
+    MLX90641EEpromParser parser(eeprom_with_oversized_alpha_scale());
     const auto alpha = parser.get_alpha();
     TEST_ASSERT_EQUAL_FLOAT(0.0f, alpha[0]);
     for (const float value : alpha) {
         TEST_ASSERT_TRUE(std::isfinite(value));
     }
+}
+
+void test_alpha_scales_decode_with_their_bias() {
+    const auto scales = MLX90641EEpromParser(test_eeprom_data).get_alpha_scales();
+    for (const std::uint8_t scale : scales) {
+        // A healthy part stays inside the range the scale helpers can represent.
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT8(20, scale);
+        TEST_ASSERT_LESS_THAN_UINT8(max_shift_exp, scale);
+    }
+    TEST_ASSERT_EQUAL_UINT8(83, MLX90641EEpromParser(eeprom_with_oversized_alpha_scale()).get_alpha_scales()[0]);
+}
+
+void test_extract_all_rejects_an_oversized_alpha_scale() {
+    ParamsMLX90641 params{};
+    TEST_ASSERT_FALSE(MLX90641EEpromParser(eeprom_with_oversized_alpha_scale()).extract_all(params));
+    // The healthy fixture still passes, so the guard is not rejecting everything.
+    TEST_ASSERT_TRUE(MLX90641EEpromParser(test_eeprom_data).extract_all(params));
 }
 
 int main(int argc, char **argv) {
@@ -241,5 +253,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_extract_all_rejects_more_broken_pixels_than_can_be_corrected);
     RUN_TEST(test_scale_helpers_saturate_on_an_oversized_exponent);
     RUN_TEST(test_oversized_alpha_scale_yields_finite_alphas);
+    RUN_TEST(test_alpha_scales_decode_with_their_bias);
+    RUN_TEST(test_extract_all_rejects_an_oversized_alpha_scale);
     return UNITY_END();
 }

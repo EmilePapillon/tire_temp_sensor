@@ -33,6 +33,13 @@ bool MLX90641EEpromParser::extract_all(ParamsMLX90641& params) const
     if (params.brokenPixels[max_broken_pixels] != no_broken_pixel) {
         return false;  // too many broken pixels
     }
+    // A saturating scale zeroes its whole row of alphas, and calculate_to()
+    // divides by the alpha: the frame would publish NaN while read_frame() succeeds.
+    const auto alpha_scales = get_alpha_scales();
+    if (std::any_of(alpha_scales.begin(), alpha_scales.end(),
+                    [](std::uint8_t scale) { return scale >= max_shift_exp; })) {
+        return false;  // alpha scale out of range
+    }
     return true;
 }
 
@@ -153,12 +160,10 @@ std::array<float, 8> MLX90641EEpromParser::get_ks_to() const
     return ks_to_values;
 }
 
-std::array<float, 192> MLX90641EEpromParser::get_alpha() const
-{
-    // Each alpha-scale word contains a six-bit upper field and a five-bit
-    // lower field. The upper field must retain bit 5; it is not a five-bit
-    // value despite the ambiguity in some datasheet tables.
-    constexpr std::array<SingleEepromWord, 6> scale_row_alpha = {
+namespace {
+
+/// The upper field is six bits, not five: some datasheet tables are ambiguous.
+constexpr std::array<SingleEepromWord, alpha_scale_rows> scale_row_alpha = {
     SingleEepromWord{EepromAddr::alpha_scale0, 5, 6, 0, false},   // (eeData[25] >> 5) + 20
     SingleEepromWord{EepromAddr::alpha_scale0, 0, 5, 0, false},   // (eeData[25] & 0x001F) + 20
     SingleEepromWord{EepromAddr::alpha_scale1, 5, 6, 0, false},   // (eeData[26] >> 5) + 20
@@ -167,16 +172,27 @@ std::array<float, 192> MLX90641EEpromParser::get_alpha() const
     SingleEepromWord{EepromAddr::alpha_scale2, 0, 5, 0, false}    // (eeData[27] & 0x001F) + 20
 };
 
-    std::array<float, 192> alpha;   
-    std::array<float, 6> row_max_alpha_norm;
-    std::array<std::uint8_t, 6> scale_row_alpha_values;
+/// The alpha-scale fields are stored biased down by this much.
+constexpr std::uint8_t alpha_scale_bias = 20;
 
-    // Extract scaling factors for each row
-    for (uint8_t i = 0; i < row_max_alpha_norm.size(); ++i) {
-        scale_row_alpha_values[i] = static_cast<uint8_t>(extract_param(scale_row_alpha[i])) + 20;
+}  // namespace
+
+std::array<std::uint8_t, alpha_scale_rows> MLX90641EEpromParser::get_alpha_scales() const
+{
+    std::array<std::uint8_t, alpha_scale_rows> scales;
+    for (std::size_t i = 0; i < scales.size(); ++i) {
+        scales[i] = static_cast<std::uint8_t>(extract_param(scale_row_alpha[i]) + alpha_scale_bias);
     }
+    return scales;
+}
 
-    const std::array<SingleEepromWord, 6> alpha_max_row = {
+std::array<float, 192> MLX90641EEpromParser::get_alpha() const
+{
+    std::array<float, 192> alpha;
+    std::array<float, alpha_scale_rows> row_max_alpha_norm;
+    const std::array<std::uint8_t, alpha_scale_rows> scale_row_alpha_values = get_alpha_scales();
+
+    const std::array<SingleEepromWord, alpha_scale_rows> alpha_max_row = {
         SingleEepromWord{EepromAddr::alpha_max_row0, 0, 11, scale_row_alpha_values[0], false}, 
         SingleEepromWord{EepromAddr::alpha_max_row1, 0, 11, scale_row_alpha_values[1], false}, 
         SingleEepromWord{EepromAddr::alpha_max_row2, 0, 11, scale_row_alpha_values[2], false}, 

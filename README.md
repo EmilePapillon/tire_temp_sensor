@@ -62,7 +62,7 @@ Every per-board / per-deployment tunable lives in [`include/config.hh`](include/
 
 ## What the firmware does
 
-**Boot.** `setup()` arms the hardware watchdog, initialises the MLX90641 (EEPROM dump, Hamming check, calibration extraction, resolution and refresh rate), samples the battery, waits `boot_delay_ms`, starts the radio, and registers the BLE protocol. A part that ships with the one dead pixel the datasheet allows is accepted: init logs a warning naming the pixel, and every frame interpolates it from its row neighbours. Any fatal error is logged and the board deliberately lets the watchdog reset it.
+**Boot.** `setup()` arms the hardware watchdog, initialises the MLX90641 (EEPROM dump, Hamming check, calibration extraction, resolution and refresh rate), samples the battery, waits `boot_delay_ms`, starts the radio, and registers the BLE protocol. A part that ships with the one dead pixel the datasheet allows is accepted: init logs a warning naming the pixel, and every frame interpolates it from its row neighbours. Calibration extraction fails closed on an image it cannot use: more broken pixels than that, or an alpha scale out of range that would otherwise publish `NaN` temperatures from a sensor still reporting every frame as a success. Any fatal error is logged and the board deliberately lets the watchdog reset it.
 
 **Loop.** Each iteration reads one frame (retrying on transient failures), computes per-pixel temperatures, averages the 16 columns, refreshes the battery reading when due, and publishes the sample. Both MLX90641 sub-pages are accepted, so the BLE update rate equals the sensor's refresh rate.
 
